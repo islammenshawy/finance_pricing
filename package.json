@@ -1,0 +1,32 @@
+{
+  "name": "loan-pricing",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:client": "npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "dev:mock": "concurrently \"npm run mock:server\" \"npm run dev:client\"",
+    "mock:server": "npx tsx server/src/mock/mockServer.ts",
+    "mock:export": "npx tsx server/src/mock/exportData.ts",
+    "build": "npm run build -w shared && npm run build -w client && npm run build -w server",
+    "start": "npm run start -w server",
+    "seed": "npm run seed -w server",
+    "test": "playwright test",
+    "test:mock": "MOCK_MODE=true playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "concurrently": "^8.2.2",
+    "playwright": "^1.57.0",
+    "typescript": "^5.3.3"
+  }
+}
