@@ -80,3 +80,8 @@ export type {
 
 // Toolbar component props
 export type { GridToolbarProps } from './GridToolbar';
+
+// Keyboard navigation
+export { useGridKeyboard } from './useGridKeyboard';
+export type { GridKeyboardOptions, GridKeyboardState, GridKeyboardReturn } from './useGridKeyboard';
+export type { KeyboardConfig, KeyboardAction, KeyBinding } from './types';

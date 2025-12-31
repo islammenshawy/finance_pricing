@@ -50,6 +50,7 @@ function UsersPage() {
 13. [Controlled vs Uncontrolled State](#controlled-vs-uncontrolled-state)
 14. [Reusable Cell Renderers](#reusable-cell-renderers)
 15. [Common Patterns & Recipes](#common-patterns--recipes)
+16. [Keyboard Navigation](#keyboard-navigation)
 
 ---
 
@@ -1262,6 +1263,221 @@ function LiveDataGrid() {
   );
 }
 ```
+
+---
+
+## Keyboard Navigation
+
+The grid supports full keyboard navigation similar to AG-Grid and Excel.
+
+### Default Keyboard Mappings
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` `←` `→` | Navigate between cells/rows |
+| `Tab` | Move to next cell (or row) |
+| `Shift+Tab` | Move to previous cell (or row) |
+| `Enter` | Start editing / Expand row |
+| `Escape` | Cancel editing / Clear focus |
+| `Space` | Toggle row selection |
+| `Home` | Go to first row |
+| `End` | Go to last row |
+| `Ctrl+Home` | Go to first cell |
+| `Ctrl+End` | Go to last cell |
+| `Page Up` | Scroll up one page |
+| `Page Down` | Scroll down one page |
+| `Ctrl+A` | Select all rows |
+| `F2` | Start editing (alternative) |
+| `Delete` | Clear cell content |
+| `Ctrl+C` | Copy selected |
+| `Ctrl+V` | Paste (if enabled) |
+| `Ctrl+Z` | Undo (if enabled) |
+| `Ctrl+Y` | Redo (if enabled) |
+
+### Enable Keyboard Navigation
+
+```tsx
+// Simple enable (all defaults)
+<DataGrid keyboard={true} />
+
+// Or with configuration
+<DataGrid
+  keyboard={{
+    enabled: true,
+    tabBehavior: 'cell',
+  }}
+/>
+```
+
+### Tab Behavior Options
+
+```tsx
+keyboard={{
+  // 'cell': Tab moves between cells, wraps to next row
+  // 'row': Tab moves between rows
+  // 'grid': Tab exits the grid (browser default)
+  tabBehavior: 'cell',
+}}
+```
+
+### Enter Key Behavior
+
+```tsx
+keyboard={{
+  // 'startEditing': Begin editing focused cell
+  // 'navigateDown': Move to cell below (Excel-like)
+  // 'expandRow': Toggle row expansion
+  // 'selectRow': Toggle row selection
+  enterBehavior: 'startEditing',
+}}
+```
+
+### Excel-like Navigation
+
+```tsx
+<DataGrid
+  keyboard={{
+    enabled: true,
+    tabBehavior: 'cell',
+    enterBehavior: 'navigateDown',  // Enter moves down like Excel
+    editOnKeyPress: true,            // Start editing by typing
+    wrapNavigation: true,            // Arrow right at end wraps to next row
+    enableCellTextSelection: true,
+  }}
+/>
+```
+
+### Custom Key Bindings
+
+```tsx
+<DataGrid
+  keyboard={{
+    enabled: true,
+    bindings: [
+      // F2 to edit (in addition to Enter)
+      { key: 'F2', action: 'startEditing' },
+
+      // Delete to clear
+      { key: 'Delete', action: 'delete' },
+
+      // Custom handler
+      {
+        key: 'F5',
+        action: (event) => {
+          event.preventDefault();
+          refreshData();
+        },
+      },
+
+      // Ctrl+Shift+C for custom copy
+      { key: 'c', ctrl: true, shift: true, action: 'copy' },
+    ],
+  }}
+/>
+```
+
+### Keyboard Event Callbacks
+
+```tsx
+<DataGrid
+  keyboard={{
+    enabled: true,
+
+    // Intercept before default handling
+    onKeyDown: (event, { focusedRowIndex, focusedColIndex, isEditing }) => {
+      if (event.key === 'F5') {
+        refreshData();
+        return false; // Prevent default grid handling
+      }
+      return true; // Allow default handling
+    },
+
+    // Focus changes
+    onFocusChange: (rowIndex, colIndex) => {
+      console.log(`Focused: row ${rowIndex}, col ${colIndex}`);
+    },
+
+    // Editing lifecycle
+    onEditStart: (rowIndex, colIndex) => {
+      console.log('Started editing');
+    },
+    onEditEnd: (rowIndex, colIndex, cancelled) => {
+      console.log(cancelled ? 'Edit cancelled' : 'Edit saved');
+    },
+
+    // Clipboard
+    onCopy: (selectedData) => {
+      navigator.clipboard.writeText(JSON.stringify(selectedData));
+    },
+    onPaste: (data, rowIndex, colIndex) => {
+      handlePaste(data, rowIndex, colIndex);
+    },
+
+    // Delete
+    onDelete: (rowIndex, colIndex) => {
+      clearCell(rowIndex, colIndex);
+    },
+
+    // Undo/Redo
+    onUndo: () => undoLastChange(),
+    onRedo: () => redoLastChange(),
+  }}
+/>
+```
+
+### Suppress Specific Keys
+
+```tsx
+<DataGrid
+  keyboard={{
+    enabled: true,
+    // Disable default handling for these keys
+    suppressKeys: ['Enter', 'Tab'],
+  }}
+/>
+```
+
+### Programmatic Focus Control
+
+```tsx
+import { useGridKeyboard } from '@/components/grid';
+
+function MyGrid() {
+  const {
+    focusedRowIndex,
+    focusedColIndex,
+    setFocusedRow,
+    setFocusedCell,
+    clearFocus,
+    isRowFocused,
+    isCellFocused,
+  } = useGridKeyboard({
+    rowCount: data.length,
+    columnCount: columns.length,
+    enabled: true,
+  });
+
+  // Focus specific row
+  const goToRow = (index: number) => setFocusedRow(index);
+
+  // Focus specific cell
+  const goToCell = (row: number, col: number) => setFocusedCell(row, col);
+
+  // Check focus state
+  const isActive = isRowFocused(5);
+}
+```
+
+### Accessibility (ARIA)
+
+The grid automatically adds ARIA attributes for screen readers:
+
+- `role="grid"` on container
+- `role="row"` on each row
+- `role="gridcell"` on each cell
+- `aria-selected` for selected rows
+- `aria-expanded` for expandable rows
+- `tabindex` for keyboard focus
 
 ---
 

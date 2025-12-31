@@ -1172,11 +1172,286 @@ export interface DataGridProps<TRow> {
   ariaLabel?: string;
 
   // === KEYBOARD NAVIGATION ===
-  /** Enable keyboard navigation */
-  keyboardNavigation?: boolean;
+  /**
+   * Keyboard navigation configuration
+   * Set to true for default behavior, false to disable, or provide config object
+   * @see KeyboardConfig
+   */
+  keyboard?: boolean | KeyboardConfig;
+}
 
-  /** Tab behavior: 'cell' navigates cells, 'row' navigates rows */
-  tabBehavior?: 'cell' | 'row';
+// =============================================================================
+// KEYBOARD NAVIGATION TYPES
+// =============================================================================
+
+/**
+ * Keyboard navigation action that can be customized
+ */
+export type KeyboardAction =
+  | 'navigateUp'
+  | 'navigateDown'
+  | 'navigateLeft'
+  | 'navigateRight'
+  | 'navigateNext'      // Tab forward
+  | 'navigatePrevious'  // Tab backward
+  | 'navigateFirst'     // Home
+  | 'navigateLast'      // End
+  | 'pageUp'
+  | 'pageDown'
+  | 'selectRow'         // Space
+  | 'selectAll'         // Ctrl+A
+  | 'expandRow'         // Enter (row mode)
+  | 'collapseRow'
+  | 'startEditing'      // Enter/F2 (cell mode)
+  | 'stopEditing'       // Enter (confirm)
+  | 'cancelEditing'     // Escape
+  | 'copy'              // Ctrl+C
+  | 'paste'             // Ctrl+V
+  | 'delete'            // Delete/Backspace
+  | 'undo'              // Ctrl+Z
+  | 'redo';             // Ctrl+Y / Ctrl+Shift+Z
+
+/**
+ * Key binding definition
+ *
+ * @example
+ * ```tsx
+ * { key: 'Enter', action: 'startEditing' }
+ * { key: 'F2', action: 'startEditing' }
+ * { key: 'a', ctrl: true, action: 'selectAll' }
+ * { key: 'ArrowDown', shift: true, action: 'extendSelectionDown' }
+ * ```
+ */
+export interface KeyBinding {
+  /** The key code (e.g., 'Enter', 'ArrowDown', 'a', 'F2') */
+  key: string;
+
+  /** Require Ctrl/Cmd key */
+  ctrl?: boolean;
+
+  /** Require Shift key */
+  shift?: boolean;
+
+  /** Require Alt key */
+  alt?: boolean;
+
+  /** Action to perform */
+  action: KeyboardAction | ((event: KeyboardEvent) => void);
+}
+
+/**
+ * Keyboard navigation configuration (AG-Grid-like)
+ *
+ * @example Default Configuration
+ * ```tsx
+ * keyboard: true
+ * // or
+ * keyboard: { enabled: true }
+ * ```
+ *
+ * @example Custom Key Bindings
+ * ```tsx
+ * keyboard: {
+ *   enabled: true,
+ *   tabBehavior: 'cell',
+ *   enterBehavior: 'startEditing',
+ *   editOnKeyPress: true,
+ *   bindings: [
+ *     { key: 'F2', action: 'startEditing' },
+ *     { key: 'Delete', action: 'delete' },
+ *   ],
+ * }
+ * ```
+ *
+ * @example Full Excel-like Navigation
+ * ```tsx
+ * keyboard: {
+ *   enabled: true,
+ *   tabBehavior: 'cell',
+ *   enterBehavior: 'navigateDown',
+ *   editOnKeyPress: true,
+ *   wrapNavigation: true,
+ *   enableCellTextSelection: true,
+ * }
+ * ```
+ */
+export interface KeyboardConfig {
+  /**
+   * Enable keyboard navigation
+   * @default true
+   */
+  enabled?: boolean;
+
+  /**
+   * Tab key behavior
+   * - 'cell': Tab moves between cells in a row, then to next row
+   * - 'row': Tab moves between rows
+   * - 'grid': Tab exits the grid (native browser behavior)
+   * @default 'cell'
+   */
+  tabBehavior?: 'cell' | 'row' | 'grid';
+
+  /**
+   * Enter key behavior
+   * - 'startEditing': Start editing the focused cell
+   * - 'navigateDown': Move to cell below (Excel-like)
+   * - 'expandRow': Expand/collapse the row
+   * - 'selectRow': Toggle row selection
+   * @default 'startEditing' (cell mode) or 'expandRow' (row mode)
+   */
+  enterBehavior?: 'startEditing' | 'navigateDown' | 'expandRow' | 'selectRow';
+
+  /**
+   * Escape key behavior
+   * - 'cancelEditing': Cancel current edit
+   * - 'clearFocus': Clear row/cell focus
+   * - 'both': Cancel edit if editing, otherwise clear focus
+   * @default 'both'
+   */
+  escapeBehavior?: 'cancelEditing' | 'clearFocus' | 'both';
+
+  /**
+   * Start editing when typing (without pressing Enter/F2)
+   * The first key typed will replace cell content
+   * @default false
+   */
+  editOnKeyPress?: boolean;
+
+  /**
+   * Keys that start editing when editOnKeyPress is true
+   * @default Alphanumeric keys + Backspace + Delete
+   */
+  editKeys?: string[];
+
+  /**
+   * Wrap navigation at row/column boundaries
+   * - true: Arrow Right at last column moves to first column of next row
+   * - false: Navigation stops at boundaries
+   * @default false
+   */
+  wrapNavigation?: boolean;
+
+  /**
+   * Enable Ctrl+C to copy selected cells/rows
+   * @default true
+   */
+  enableCopy?: boolean;
+
+  /**
+   * Enable Ctrl+V to paste (requires onPaste handler)
+   * @default false
+   */
+  enablePaste?: boolean;
+
+  /**
+   * Enable Ctrl+Z / Ctrl+Y for undo/redo (requires handlers)
+   * @default false
+   */
+  enableUndoRedo?: boolean;
+
+  /**
+   * Enable Delete/Backspace to clear cell content
+   * @default true
+   */
+  enableDelete?: boolean;
+
+  /**
+   * Enable text selection within cells
+   * @default false
+   */
+  enableCellTextSelection?: boolean;
+
+  /**
+   * Focus the first cell when grid receives focus
+   * @default true
+   */
+  focusFirstCellOnFocus?: boolean;
+
+  /**
+   * Maintain focus within grid (don't allow Tab to exit)
+   * @default false
+   */
+  trapFocus?: boolean;
+
+  /**
+   * Custom key bindings (override or extend defaults)
+   */
+  bindings?: KeyBinding[];
+
+  /**
+   * Suppress default keyboard behavior for specific keys
+   * Useful when implementing custom handlers
+   *
+   * @example
+   * ```tsx
+   * suppressKeys: ['Enter', 'Tab']
+   * ```
+   */
+  suppressKeys?: string[];
+
+  /**
+   * Callback when a key is pressed (before default handling)
+   * Return false to prevent default grid handling
+   *
+   * @example
+   * ```tsx
+   * onKeyDown: (event, { focusedRow, focusedCol }) => {
+   *   if (event.key === 'F5') {
+   *     refreshData();
+   *     return false; // Prevent default
+   *   }
+   *   return true; // Allow default handling
+   * }
+   * ```
+   */
+  onKeyDown?: (
+    event: React.KeyboardEvent,
+    context: {
+      focusedRowIndex: number;
+      focusedColIndex: number;
+      isEditing: boolean;
+    }
+  ) => boolean;
+
+  /**
+   * Callback when navigation changes focus
+   */
+  onFocusChange?: (rowIndex: number, colIndex: number) => void;
+
+  /**
+   * Callback when editing starts via keyboard
+   */
+  onEditStart?: (rowIndex: number, colIndex: number) => void;
+
+  /**
+   * Callback when editing ends via keyboard
+   */
+  onEditEnd?: (rowIndex: number, colIndex: number, cancelled: boolean) => void;
+
+  /**
+   * Callback for copy action
+   */
+  onCopy?: (selectedData: unknown[]) => void;
+
+  /**
+   * Callback for paste action
+   */
+  onPaste?: (data: string, rowIndex: number, colIndex: number) => void;
+
+  /**
+   * Callback for delete action
+   */
+  onDelete?: (rowIndex: number, colIndex: number) => void;
+
+  /**
+   * Callback for undo action
+   */
+  onUndo?: () => void;
+
+  /**
+   * Callback for redo action
+   */
+  onRedo?: () => void;
 }
 
 // =============================================================================
