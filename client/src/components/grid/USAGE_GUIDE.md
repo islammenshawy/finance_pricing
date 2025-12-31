@@ -35,17 +35,54 @@ function UsersPage() {
 
 ## Table of Contents
 
-1. [Column Configuration](#column-configuration)
-2. [Row Selection](#row-selection)
-3. [Row Grouping](#row-grouping)
-4. [Row Expansion](#row-expansion)
-5. [Toolbar & Search](#toolbar--search)
-6. [Sorting & Filtering](#sorting--filtering)
-7. [Virtual Scrolling](#virtual-scrolling)
-8. [Inline Editing](#inline-editing)
-9. [Styling](#styling)
-10. [Events](#events)
-11. [Reusable Cell Renderers](#reusable-cell-renderers)
+1. [Flat Table (No Grouping)](#flat-table-no-grouping)
+2. [Column Configuration](#column-configuration)
+3. [Row Selection](#row-selection)
+4. [Row Grouping](#row-grouping)
+5. [Row Expansion](#row-expansion)
+6. [Toolbar & Search](#toolbar--search)
+7. [Sorting & Filtering](#sorting--filtering)
+8. [Pagination](#pagination)
+9. [Virtual Scrolling](#virtual-scrolling)
+10. [Inline Editing](#inline-editing)
+11. [Styling](#styling)
+12. [Events](#events)
+13. [Controlled vs Uncontrolled State](#controlled-vs-uncontrolled-state)
+14. [Reusable Cell Renderers](#reusable-cell-renderers)
+15. [Common Patterns & Recipes](#common-patterns--recipes)
+
+---
+
+## Flat Table (No Grouping)
+
+By default, the grid renders as a flat table. Simply omit the `groupBy` prop:
+
+```tsx
+// Flat table - no groupBy prop needed
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+
+  // Optional features
+  selection={{ mode: 'multiple', showCheckbox: true }}
+  sortable={true}
+  toolbar={{
+    search: { enabled: true },
+  }}
+/>
+```
+
+Or explicitly set `groupBy={null}`:
+
+```tsx
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+  groupBy={null}  // Explicit flat mode
+/>
+```
 
 ---
 
@@ -357,6 +394,63 @@ toolbar={{
 }}
 ```
 
+### Search with Column Selector Dropdown
+
+Allow users to search specific columns:
+
+```tsx
+toolbar={{
+  search: {
+    enabled: true,
+    placeholder: 'Search...',
+
+    // Enable column selector dropdown
+    columnSelector: true,
+    defaultSearchColumn: 'all',  // or specific column id
+
+    // Define which columns are searchable
+    searchableColumns: ['loanNumber', 'customerName', 'status'],
+  },
+}}
+```
+
+### Advanced Search Options
+
+```tsx
+toolbar={{
+  search: {
+    enabled: true,
+    placeholder: 'Search loans...',
+
+    // Behavior
+    debounceMs: 300,           // Delay before search triggers
+    minLength: 2,              // Min characters to trigger search
+
+    // UX
+    showClearButton: true,     // Show X to clear
+    showShortcutHint: true,    // Show ⌘K hint
+    shortcutKey: 'k',          // Keyboard shortcut
+    autoFocus: false,          // Focus on mount
+
+    // Layout
+    position: 'left',          // 'left' | 'center' | 'right'
+    width: 250,                // Fixed width
+    expandOnFocus: true,       // Expand when focused
+    expandedWidth: 400,        // Width when expanded
+
+    // Highlighting
+    highlightMatches: true,    // Highlight matching text in cells
+
+    // Custom filter logic
+    filterFn: (row, query, columns) => {
+      const q = query.toLowerCase();
+      return row.name.toLowerCase().includes(q) ||
+             row.tags.some(tag => tag.includes(q));
+    },
+  },
+}}
+```
+
 ---
 
 ## Sorting & Filtering
@@ -392,6 +486,52 @@ toolbar={{
     onFilterChange: (filters) => {
       console.log('Filters:', filters);
     },
+  }}
+/>
+```
+
+---
+
+## Pagination
+
+Alternative to virtual scrolling for smaller datasets:
+
+### Client-Side Pagination
+
+```tsx
+<DataGrid
+  data={allData}
+  columns={columns}
+  getRowId={(row) => row.id}
+  pagination={{
+    enabled: true,
+    pageSize: 25,
+    pageSizeOptions: [10, 25, 50, 100],
+    showPageSizeSelector: true,
+  }}
+/>
+```
+
+### Server-Side Pagination
+
+```tsx
+const [page, setPage] = useState(0);
+const [pageSize, setPageSize] = useState(25);
+const { data, total } = useQuery(['items', page, pageSize], () =>
+  fetchItems({ page, pageSize })
+);
+
+<DataGrid
+  data={data}
+  columns={columns}
+  getRowId={(row) => row.id}
+  pagination={{
+    enabled: true,
+    pageSize: pageSize,
+    currentPage: page,
+    totalRows: total,  // Server provides total count
+    onPageChange: setPage,
+    onPageSizeChange: setPageSize,
   }}
 />
 ```
@@ -554,6 +694,88 @@ For large datasets (100+ rows), enable virtual scrolling:
 
     // Filtering
     onFilterChange: (filters) => {},
+  }}
+/>
+```
+
+---
+
+## Controlled vs Uncontrolled State
+
+The grid can operate in controlled or uncontrolled mode for each feature.
+
+### Uncontrolled (Default)
+
+Grid manages its own state internally:
+
+```tsx
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+  defaultSortColumn="name"
+  defaultSortDirection="asc"
+/>
+```
+
+### Controlled
+
+You manage state externally:
+
+```tsx
+const [gridState, setGridState] = useState<GridState>({
+  selectedIds: new Set(),
+  expandedIds: new Set(),
+  sortColumn: 'name',
+  sortDirection: 'asc',
+  columnVisibility: { email: true, phone: false },
+});
+
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+
+  // Pass controlled state
+  state={gridState}
+
+  // Handle state changes
+  events={{
+    onSelectionChange: (rows, ids) =>
+      setGridState(s => ({ ...s, selectedIds: ids })),
+    onSortChange: (col, dir) =>
+      setGridState(s => ({ ...s, sortColumn: col, sortDirection: dir })),
+    onColumnVisibilityChange: (colId, visible) =>
+      setGridState(s => ({
+        ...s,
+        columnVisibility: { ...s.columnVisibility, [colId]: visible },
+      })),
+  }}
+/>
+```
+
+### Controlled Toolbar
+
+```tsx
+const [toolbarState, setToolbarState] = useState<ToolbarState>({
+  searchQuery: '',
+  activeQuickFilter: 'all',
+  density: 'standard',
+});
+
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+
+  toolbarState={toolbarState}
+  toolbarEvents={{
+    onSearchChange: (query) =>
+      setToolbarState(s => ({ ...s, searchQuery: query })),
+    onQuickFilterChange: (filterId) =>
+      setToolbarState(s => ({ ...s, activeQuickFilter: filterId })),
+    onDensityChange: (density) =>
+      setToolbarState(s => ({ ...s, density })),
   }}
 />
 ```
@@ -832,3 +1054,232 @@ import type {
   GridToolbarProps,
 } from '@/components/grid';
 ```
+
+---
+
+## Common Patterns & Recipes
+
+### Master-Detail View
+
+Grid with expandable rows showing related data:
+
+```tsx
+<DataGrid
+  data={orders}
+  columns={orderColumns}
+  getRowId={(order) => order.id}
+  expansion={{
+    enabled: true,
+    expandedContent: (order) => (
+      <div className="p-4 bg-muted/50">
+        <h4 className="font-medium mb-2">Order Items</h4>
+        <DataGrid
+          data={order.items}
+          columns={itemColumns}
+          getRowId={(item) => item.id}
+          compact={true}
+        />
+      </div>
+    ),
+  }}
+/>
+```
+
+### Bulk Actions with Selection
+
+Show actions when rows are selected:
+
+```tsx
+<DataGrid
+  data={users}
+  columns={columns}
+  getRowId={(user) => user.id}
+  selection={{ mode: 'multiple', showCheckbox: true }}
+  toolbar={{
+    actions: [
+      {
+        id: 'delete',
+        label: 'Delete Selected',
+        icon: <Trash className="h-4 w-4" />,
+        variant: 'destructive',
+        showWhen: 'hasSelection',
+        onClick: async (selectedRows) => {
+          await api.deleteUsers(selectedRows.map(r => r.id));
+          refetch();
+        },
+      },
+      {
+        id: 'export-selected',
+        label: 'Export Selected',
+        icon: <Download className="h-4 w-4" />,
+        showWhen: 'hasSelection',
+        onClick: (selectedRows) => exportToCsv(selectedRows),
+      },
+    ],
+  }}
+/>
+```
+
+### CRUD Table with Add/Edit Dialog
+
+```tsx
+function UsersTable() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+
+  const columns: ColumnDef<User>[] = [
+    { id: 'name', header: 'Name', accessor: (r) => r.name },
+    { id: 'email', header: 'Email', accessor: (r) => r.email },
+    {
+      id: 'actions',
+      header: '',
+      width: 80,
+      cell: (row) => (
+        <ActionCell>
+          <IconButtonCell
+            icon={<Pencil className="h-4 w-4" />}
+            onClick={() => setEditingUser(row)}
+          />
+          <IconButtonCell
+            icon={<Trash className="h-4 w-4" />}
+            onClick={() => handleDelete(row.id)}
+            variant="destructive"
+          />
+        </ActionCell>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <DataGrid
+        data={users}
+        columns={columns}
+        getRowId={(user) => user.id}
+        toolbar={{
+          search: { enabled: true },
+          actions: [
+            {
+              id: 'add',
+              label: 'Add User',
+              icon: <Plus className="h-4 w-4" />,
+              variant: 'primary',
+              onClick: () => setIsAddOpen(true),
+            },
+          ],
+        }}
+      />
+      <AddUserDialog open={isAddOpen} onClose={() => setIsAddOpen(false)} />
+      <EditUserDialog user={editingUser} onClose={() => setEditingUser(null)} />
+    </>
+  );
+}
+```
+
+### Filtered Data with URL Sync
+
+Sync filters with URL for shareable links:
+
+```tsx
+function FilteredTable() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialFilter = searchParams.get('filter') || 'all';
+  const initialSearch = searchParams.get('q') || '';
+
+  return (
+    <DataGrid
+      data={data}
+      columns={columns}
+      getRowId={(row) => row.id}
+      toolbarState={{
+        searchQuery: initialSearch,
+        activeQuickFilter: initialFilter,
+      }}
+      toolbarEvents={{
+        onSearchChange: (query) => {
+          setSearchParams(prev => {
+            if (query) prev.set('q', query);
+            else prev.delete('q');
+            return prev;
+          });
+        },
+        onQuickFilterChange: (filterId) => {
+          setSearchParams(prev => {
+            if (filterId && filterId !== 'all') prev.set('filter', filterId);
+            else prev.delete('filter');
+            return prev;
+          });
+        },
+      }}
+      toolbar={{
+        search: { enabled: true },
+        quickFilters: [
+          { id: 'all', label: 'All', filter: () => true },
+          { id: 'active', label: 'Active', filter: (r) => r.status === 'active' },
+          { id: 'pending', label: 'Pending', filter: (r) => r.status === 'pending' },
+        ],
+      }}
+    />
+  );
+}
+```
+
+### Real-time Data Updates
+
+Handle live data with optimistic updates:
+
+```tsx
+function LiveDataGrid() {
+  const { data, mutate } = useSWR('/api/items', fetcher, {
+    refreshInterval: 5000, // Poll every 5s
+  });
+
+  const handleCellChange = async (row, columnId, newValue) => {
+    // Optimistic update
+    mutate(
+      data.map(r => r.id === row.id ? { ...r, [columnId]: newValue } : r),
+      false // Don't revalidate yet
+    );
+
+    try {
+      await api.updateItem(row.id, { [columnId]: newValue });
+      mutate(); // Revalidate after success
+    } catch (error) {
+      mutate(); // Revert on error
+      toast.error('Failed to update');
+    }
+  };
+
+  return (
+    <DataGrid
+      data={data || []}
+      columns={columns}
+      getRowId={(row) => row.id}
+      events={{ onCellChange: handleCellChange }}
+    />
+  );
+}
+```
+
+---
+
+## Dependencies
+
+The DataGrid component requires these dependencies:
+
+```json
+{
+  "@tanstack/react-virtual": "^3.x",
+  "@radix-ui/react-dropdown-menu": "^2.x",
+  "lucide-react": "^0.x",
+  "tailwindcss": "^3.x"
+}
+```
+
+UI components used internally:
+- `@/components/ui/button` - Button component
+- `@/components/ui/input` - Input component
+- `@/components/ui/dropdown-menu` - Dropdown menus
+- `@/lib/utils` - `cn()` utility for classnames
