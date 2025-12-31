@@ -1,4 +1,20 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
+
+// Helper to navigate to customer's loans page
+async function navigateToCustomerLoans(page: Page) {
+  // Wait for customer name headings to load
+  await page.waitForSelector('h3', { timeout: 15000 });
+
+  // Click on the first customer name (h3 inside the card)
+  const firstCustomer = page.locator('h3').first();
+  await firstCustomer.click();
+
+  // Wait for loan pricing page to load - look for Back button or loan data
+  await page.waitForSelector('button:has-text("Back"), [data-testid^="loan-row-"]', { timeout: 15000 });
+
+  // Additional wait for data to render
+  await page.waitForTimeout(500);
+}
 
 test.describe('Loan Pricing Table', () => {
   test.beforeEach(async ({ page }) => {
@@ -19,37 +35,23 @@ test.describe('Loan Pricing Table', () => {
   });
 
   test('should navigate to customer loans when clicking a customer', async ({ page }) => {
-    // Click on the first customer
-    const firstCustomer = page.locator('.border.rounded-lg, [data-testid="customer-card"]').first();
-    await firstCustomer.click();
-
-    // Wait for loans to load - should see a table or loan list
-    await page.waitForSelector('table, [data-testid="loan-table"]', { timeout: 10000 });
+    await navigateToCustomerLoans(page);
 
     // Should see loan data
-    await expect(page.locator('table tbody tr, [data-testid="loan-row"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid^="loan-row-"]').first()).toBeVisible();
   });
 
   test('should display loan columns correctly', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
+    await navigateToCustomerLoans(page);
 
-    await page.waitForSelector('table', { timeout: 10000 });
-
-    // Check for expected column headers (use .first() to avoid strict mode violations)
-    const headers = page.locator('th');
-    await expect(headers.filter({ hasText: /loan|#/i }).first()).toBeVisible();
-    await expect(headers.filter({ hasText: /amount/i }).first()).toBeVisible();
-    await expect(headers.filter({ hasText: /rate/i }).first()).toBeVisible();
+    // Check for expected column headers (div-based grid header)
+    await expect(page.locator('text=/Loan.*#|#/i').first()).toBeVisible();
+    await expect(page.locator('text=/Amount/i').first()).toBeVisible();
+    await expect(page.locator('text=/Base|Rate/i').first()).toBeVisible();
   });
 
   test('should support grouping by currency', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
-
-    await page.waitForSelector('table', { timeout: 10000 });
+    await navigateToCustomerLoans(page);
 
     // Page should already be grouped by currency (default)
     // Look for currency group headers - they appear as badges like "4 loans"
@@ -58,18 +60,14 @@ test.describe('Loan Pricing Table', () => {
   });
 
   test('should expand loan row to show details', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
+    await navigateToCustomerLoans(page);
 
-    await page.waitForSelector('table', { timeout: 10000 });
+    // Find chevron on first loan row to expand
+    const firstRow = page.locator('[data-testid^="loan-row-"]').first();
+    const chevron = firstRow.locator('svg.lucide-chevron-right, svg.lucide-chevron-down').first();
 
-    // Find expand button on first loan row
-    const firstRow = page.locator('table tbody tr').first();
-    const expandButton = firstRow.locator('button').first();
-
-    if (await expandButton.isVisible()) {
-      await expandButton.click();
+    if (await chevron.isVisible()) {
+      await chevron.click();
 
       // Should show expanded content (invoices, fees)
       await page.waitForTimeout(500);
@@ -81,38 +79,30 @@ test.describe('Loan Pricing Table', () => {
   });
 
   test('should allow filtering by search', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
-
-    await page.waitForSelector('table', { timeout: 10000 });
+    await navigateToCustomerLoans(page);
 
     // Find search input
     const searchInput = page.locator('input[placeholder*="Search"], input[type="search"]');
 
     if (await searchInput.isVisible()) {
       // Get initial row count
-      const initialRows = await page.locator('table tbody tr').count();
+      const initialRows = await page.locator('[data-testid^="loan-row-"]').count();
 
       // Type in search
       await searchInput.fill('TF-2024');
       await page.waitForTimeout(500);
 
       // Rows should be filtered (or stay same if all match)
-      const filteredRows = await page.locator('table tbody tr').count();
+      const filteredRows = await page.locator('[data-testid^="loan-row-"]').count();
       expect(filteredRows).toBeLessThanOrEqual(initialRows);
     }
   });
 
   test('should display loan amounts formatted correctly', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
-
-    await page.waitForSelector('table', { timeout: 10000 });
+    await navigateToCustomerLoans(page);
 
     // Find amount cells (should have currency symbols or formatted numbers)
-    const amountCells = page.locator('td').filter({ hasText: /[\$€£¥]|[\d,]+\.?\d*/ });
+    const amountCells = page.locator('[data-testid^="loan-row-"]').locator('text=/\\$[\\d,]+/');
     await expect(amountCells.first()).toBeVisible();
 
     // Check that amounts are formatted (contain commas for thousands)
@@ -121,16 +111,12 @@ test.describe('Loan Pricing Table', () => {
   });
 
   test('should show rate percentages correctly', async ({ page }) => {
-    // Navigate to first customer
-    const firstCustomer = page.locator('.border.rounded-lg').first();
-    await firstCustomer.click();
-
-    await page.waitForSelector('table', { timeout: 10000 });
+    await navigateToCustomerLoans(page);
 
     // Find rate cells (should contain % or decimal rates)
-    const rateCells = page.locator('td').filter({ hasText: /%/ });
+    const rateCells = page.locator('[data-testid^="loan-row-"]').locator('text=/%/');
 
-    if (await rateCells.first().isVisible()) {
+    if ((await rateCells.count()) > 0) {
       const rateText = await rateCells.first().textContent();
       expect(rateText).toMatch(/\d+\.?\d*%/);
     }
