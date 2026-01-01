@@ -7,6 +7,7 @@ import loansRouter from './routes/loans';
 import feeConfigsRouter from './routes/feeConfigs';
 import currenciesRouter from './routes/currencies';
 import customersRouter from './routes/customers';
+import snapshotsRouter from './routes/snapshots';
 
 const app = express();
 const PORT = process.env.PORT || 4001;
@@ -14,7 +15,7 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/loan_p
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 // Serve static files from the React app build
 // When running from dist/index.js, __dirname is server/dist
@@ -33,6 +34,7 @@ app.use('/api/customers', customersRouter);
 app.use('/api/loans', loansRouter);
 app.use('/api/fee-configs', feeConfigsRouter);
 app.use('/api/currencies', currenciesRouter);
+app.use('/api/snapshots', snapshotsRouter);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -85,6 +87,9 @@ async function start() {
       console.log('  POST   /api/currencies');
       console.log('  GET    /api/currencies/rates');
       console.log('  POST   /api/currencies/rates');
+      console.log('  GET    /api/snapshots');
+      console.log('  GET    /api/snapshots/:id');
+      console.log('  POST   /api/snapshots');
     });
   } catch (error) {
     console.error('Failed to start server:', error);

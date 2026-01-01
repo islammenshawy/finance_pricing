@@ -612,13 +612,11 @@ test.describe('Bulk Operations', () => {
     }
   });
 
-  // Note: This test is flaky due to timing issues with state synchronization between
-  // preview calculations and change tracking. It passes on retry but may fail on first run.
-  // TODO: Investigate state sync timing between previews and Redux change store
   test('should save changes and show in audit history', async ({ page }) => {
-    // Reset mock data first (if using mock server)
+    // Reset mock data and reload page to ensure fresh data in React Query cache
     await page.request.post('http://localhost:4001/api/mock/reset').catch(() => {});
-    await page.waitForTimeout(500);
+    await page.reload();
+    await page.waitForSelector('[data-testid^="loan-row-"]', { timeout: 10000 });
 
     // Find the first loan row and click on the base rate cell to edit it directly
     const firstLoanRow = page.locator('[data-testid^="loan-row-"]').first();
@@ -627,17 +625,24 @@ test.describe('Bulk Operations', () => {
     // Find the base rate button (editable cell) in the first row
     const baseRateButton = firstLoanRow.locator('button').filter({ hasText: /^\d+\.\d+%$/ }).first();
     await expect(baseRateButton).toBeVisible({ timeout: 3000 });
+
+    // Get current rate and calculate a different value to ensure change is tracked
+    const currentRateText = await baseRateButton.textContent();
+    const currentRate = parseFloat(currentRateText?.replace('%', '') || '5');
+    const newRate = currentRate >= 10 ? (currentRate - 2).toFixed(2) : (currentRate + 2).toFixed(2);
+
     await baseRateButton.click();
 
-    // An input should appear - fill in the new rate (9.25 = 9.25%)
+    // An input should appear - fill in a DIFFERENT rate to ensure change is tracked
     const rateInput = firstLoanRow.locator('input[type="number"]').first();
     await expect(rateInput).toBeVisible({ timeout: 3000 });
-    await rateInput.fill('9.25');
+    await rateInput.fill(newRate);
     await rateInput.press('Enter');
 
     // Wait for the preview to calculate and show deltas in the group header or row
-    // The USD group or loan row should show a net delta like "+$32,269"
-    await expect(page.locator('text=/\\+\\$[0-9,]+\\.[0-9]+/').first()).toBeVisible({ timeout: 8000 });
+    // Look for any positive delta (could be any currency symbol like $, د.إ, ¥, etc.)
+    // The pattern matches a + followed by any character(s) and then digits with decimals
+    await expect(page.locator('text=/^\\+.+[0-9,]+/').first()).toBeVisible({ timeout: 8000 });
 
     // The impact panel should have an expand button (either enabled or the save should be visible)
     const saveButton = page.locator('[data-testid="save-all-btn"]');
@@ -662,12 +667,19 @@ test.describe('Bulk Operations', () => {
     await expect(saveButton).toBeVisible({ timeout: 10000 });
     await expect(saveButton).toBeEnabled({ timeout: 3000 });
 
-    // Click save and intercept the response to wait for completion
+    // Click save - this opens the save dialog
+    await saveButton.click();
+
+    // Wait for the save dialog to appear and click the confirm button
+    const dialogSaveButton = page.locator('button:has-text("Save Changes")');
+    await expect(dialogSaveButton).toBeVisible({ timeout: 5000 });
+
+    // Click save in dialog and intercept the response to wait for completion
     const saveResponsePromise = page.waitForResponse(
       (resp) => resp.url().includes('/api/loans') && resp.request().method() === 'PUT',
       { timeout: 15000 }
     );
-    await saveButton.click();
+    await dialogSaveButton.click();
     await saveResponsePromise;
 
     // After save, expand first loan row by clicking specifically on the chevron icon

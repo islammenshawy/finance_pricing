@@ -33,6 +33,8 @@ interface LoanRowProps {
   pendingFeeAdds: FeeChange[];
   isFeeDeleted: (feeId: string) => boolean;
   getFeeUpdates: (feeId: string) => Partial<Fee> | undefined;
+  isNewFee?: (feeId: string) => boolean;
+  readOnly?: boolean;
 }
 
 /**
@@ -61,6 +63,8 @@ export function LoanRow({
   pendingFeeAdds,
   isFeeDeleted,
   getFeeUpdates,
+  isNewFee,
+  readOnly = false,
 }: LoanRowProps) {
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
   const effectiveRate = preview?.effectiveRate ?? loan.pricing.effectiveRate;
@@ -73,10 +77,17 @@ export function LoanRow({
   const pendingAddCount = pendingFeeAdds.length;
   const hasFeeChanges = pendingDeleteCount > 0 || pendingAddCount > 0;
 
-  // Use loan's original values as baseline for comparison
-  const feesDelta = totalFees !== loan.totalFees;
-  const interestDelta = interestAmount !== loan.interestAmount;
-  const netDelta = netProceeds !== loan.netProceeds;
+  // For playback mode, use original values from preview if available
+  // Otherwise use loan's values as baseline for comparison
+  const originalFees = preview?.originalTotalFees ?? loan.totalFees;
+  const originalInterest = preview?.originalInterestAmount ?? loan.interestAmount;
+  const originalNet = preview?.originalNetProceeds ?? loan.netProceeds;
+  const originalRate = preview?.originalEffectiveRate ?? loan.pricing.effectiveRate;
+
+  const feesDelta = totalFees !== originalFees;
+  const interestDelta = interestAmount !== originalInterest;
+  const netDelta = netProceeds !== originalNet;
+  const rateDelta = effectiveRate !== originalRate;
   const hasChanges = !!preview || isModified || hasFeeChanges;
 
   return (
@@ -84,13 +95,13 @@ export function LoanRow({
       {/* Main Row */}
       <div
         data-testid={`loan-row-${loan.loanNumber}`}
-        className={`grid grid-cols-[12px_4px_40px_32px_1fr_1fr_80px_1fr_96px_96px_1fr_1fr_112px_1fr_96px_40px] items-center cursor-pointer transition-all text-sm min-h-[44px] py-1 overflow-hidden ${
+        className={`grid grid-cols-[12px_4px_40px_32px_1fr_1fr_80px_1fr_96px_96px_1fr_1fr_112px_1fr_96px_40px] items-center cursor-pointer transition-colors text-sm min-h-[44px] py-1 min-w-max ${
           isSelected
             ? 'bg-blue-50 dark:bg-blue-950/40 border-l-2 border-l-blue-500'
             : hasChanges
             ? 'bg-amber-50/50 dark:bg-amber-950/30 border-l-2 border-l-amber-500'
-            : 'hover:bg-muted/30 border-l-2 border-l-transparent'
-        } ${isExpanded ? 'bg-muted/10' : ''}`}
+            : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 border-l-2 border-l-transparent'
+        } ${isExpanded ? 'bg-slate-50/50 dark:bg-slate-800/30' : ''}`}
         onClick={onToggleExpand}
       >
         <div /> {/* Spacer */}
@@ -100,7 +111,8 @@ export function LoanRow({
             type="checkbox"
             checked={isSelected}
             onChange={onToggleSelect}
-            className="rounded border-slate-300 text-primary focus:ring-primary/20"
+            disabled={readOnly}
+            className="rounded border-slate-300 text-primary focus:ring-primary/20 disabled:opacity-50"
           />
         </div>
         <div className="flex justify-center">
@@ -110,76 +122,83 @@ export function LoanRow({
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
         </div>
-        <div className="px-3 font-medium text-primary truncate">{loan.loanNumber}</div>
-        <div className="px-3 text-muted-foreground truncate">{loan.borrowerName}</div>
+        <div className="px-3 font-semibold text-primary truncate text-[13px]">{loan.loanNumber}</div>
+        <div className="px-3 text-slate-600 dark:text-slate-300 truncate text-[13px]">{loan.borrowerName}</div>
         <div className="px-3 text-center">
-          <Badge variant="outline" className="text-xs font-normal">{loan.invoices.length}</Badge>
+          <Badge variant="outline" className="text-xs font-medium tabular-nums">{loan.invoices.length}</Badge>
         </div>
-        <div className="px-3 text-right font-mono whitespace-nowrap">
+        <div className="px-3 text-right font-mono font-medium text-[13px] tabular-nums whitespace-nowrap">
           {formatCurrency(loan.totalAmount, loan.currency)}
         </div>
         <div className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
           <EditableRateCell
             value={(getNewValue(loan.id, 'pricing.baseRate') as number) ?? loan.pricing.baseRate}
-            isModified={isFieldModified(loan.id, 'pricing.baseRate')}
-            originalValue={loan.pricing.baseRate}
+            isModified={isFieldModified(loan.id, 'pricing.baseRate') || (preview?.originalBaseRate !== undefined && preview.originalBaseRate !== loan.pricing.baseRate)}
+            originalValue={preview?.originalBaseRate ?? loan.pricing.baseRate}
             isLocked={isLocked}
+            readOnly={readOnly}
             onChange={(value) => onPreviewChange(loan.id, 'baseRate', value)}
           />
         </div>
         <div className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
           <EditableRateCell
             value={(getNewValue(loan.id, 'pricing.spread') as number) ?? loan.pricing.spread}
-            isModified={isFieldModified(loan.id, 'pricing.spread')}
-            originalValue={loan.pricing.spread}
+            isModified={isFieldModified(loan.id, 'pricing.spread') || (preview?.originalSpread !== undefined && preview.originalSpread !== loan.pricing.spread)}
+            originalValue={preview?.originalSpread ?? loan.pricing.spread}
             isLocked={isLocked}
+            readOnly={readOnly}
             onChange={(value) => onPreviewChange(loan.id, 'spread', value)}
           />
         </div>
-        <div className="px-3 text-right font-mono">
-          <span className={hasChanges ? 'text-amber-600 font-semibold' : ''}>{formatPercent(effectiveRate)}</span>
+        <div className="px-3 text-right font-mono tabular-nums text-[13px]">
+          <div className={rateDelta ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-700 dark:text-slate-200'}>{formatPercent(effectiveRate)}</div>
+          {rateDelta && (
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              was {formatPercent(originalRate)}
+            </div>
+          )}
         </div>
-        <div className="px-3 text-right font-mono">
-          <div className={feesDelta || hasFeeChanges ? 'text-amber-600 font-semibold' : 'text-muted-foreground'}>
+        <div className="px-3 text-right font-mono tabular-nums text-[13px]">
+          <div className={feesDelta || hasFeeChanges ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-600 dark:text-slate-300'}>
             {formatCurrency(totalFees, loan.currency)}
             {hasFeeChanges && (
-              <span className="text-xs ml-0.5">
+              <span className="text-[11px] ml-0.5">
                 {pendingAddCount > 0 && `+${pendingAddCount}`}
                 {pendingDeleteCount > 0 && `-${pendingDeleteCount}`}
               </span>
             )}
           </div>
           {feesDelta && (
-            <div className={`text-xs ${totalFees > loan.totalFees ? 'text-red-500' : 'text-green-500'}`}>
-              {totalFees > loan.totalFees ? '+' : ''}{formatCurrency(totalFees - loan.totalFees, loan.currency)}
+            <div className={`text-[11px] font-medium ${totalFees > originalFees ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {totalFees > originalFees ? '+' : ''}{formatCurrency(totalFees - originalFees, loan.currency)}
             </div>
           )}
         </div>
-        <div className="px-3 text-right font-mono">
-          <div className={interestDelta ? 'text-amber-600 font-semibold' : ''}>
+        <div className="px-3 text-right font-mono tabular-nums text-[13px]">
+          <div className={interestDelta ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-600 dark:text-slate-300'}>
             {formatCurrency(interestAmount, loan.currency)}
           </div>
           {interestDelta && (
-            <div className={`text-xs ${interestAmount > loan.interestAmount ? 'text-red-500' : 'text-green-500'}`}>
-              {interestAmount > loan.interestAmount ? '+' : ''}{formatCurrency(interestAmount - loan.interestAmount, loan.currency)}
+            <div className={`text-[11px] font-medium ${interestAmount > originalInterest ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {interestAmount > originalInterest ? '+' : ''}{formatCurrency(interestAmount - originalInterest, loan.currency)}
             </div>
           )}
         </div>
-        <div className="px-3 text-right font-mono font-semibold">
-          <div className={netDelta ? 'text-amber-600' : ''}>
+        <div className="px-3 text-right font-mono tabular-nums text-[13px] font-bold">
+          <div className={netDelta ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-slate-100'}>
             {formatCurrency(netProceeds, loan.currency)}
           </div>
           {netDelta && (
-            <div className={`text-xs font-normal ${netProceeds > loan.netProceeds ? 'text-green-500' : 'text-red-500'}`}>
-              {netProceeds > loan.netProceeds ? '+' : ''}{formatCurrency(netProceeds - loan.netProceeds, loan.currency)}
+            <div className={`text-[11px] font-semibold ${netProceeds > originalNet ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {netProceeds > originalNet ? '+' : ''}{formatCurrency(netProceeds - originalNet, loan.currency)}
             </div>
           )}
         </div>
         <div className="px-3 text-center" onClick={(e) => e.stopPropagation()}>
-          <StatusCell loan={loan} onStatusChange={onStatusChange} />
+          <StatusCell loan={loan} onStatusChange={onStatusChange} readOnly={readOnly} />
         </div>
         <div className="px-2 flex justify-center" onClick={(e) => e.stopPropagation()}>
-          {loan.invoices.length > 1 && !isLocked && (
+          {loan.invoices.length > 1 && !isLocked && !readOnly && (
             <Button
               variant="ghost"
               size="sm"
@@ -204,6 +223,7 @@ export function LoanRow({
             feeConfigs={feeConfigs}
             preview={preview}
             isLocked={isLocked}
+            readOnly={readOnly}
             onAddFee={onAddFee}
             onUpdateFee={onUpdateFee}
             onRemoveFee={onRemoveFee}
@@ -211,6 +231,7 @@ export function LoanRow({
             pendingFeeAdds={pendingFeeAdds}
             isFeeDeleted={isFeeDeleted}
             getFeeUpdates={getFeeUpdates}
+            isNewFee={isNewFee}
           />
         </div>
       )}

@@ -20,14 +20,23 @@ interface MockData {
   loans: any[];
   feeConfigs: any[];
   auditEntries: any[];
+  snapshots: any[];
 }
 
 function loadData(): MockData {
+  // Load snapshots if file exists, otherwise start empty
+  let snapshots: any[] = [];
+  const snapshotsPath = path.join(dataDir, 'snapshots.json');
+  if (fs.existsSync(snapshotsPath)) {
+    snapshots = JSON.parse(fs.readFileSync(snapshotsPath, 'utf-8'));
+  }
+
   return {
     customers: JSON.parse(fs.readFileSync(path.join(dataDir, 'customers.json'), 'utf-8')),
     loans: JSON.parse(fs.readFileSync(path.join(dataDir, 'loans.json'), 'utf-8')),
     feeConfigs: JSON.parse(fs.readFileSync(path.join(dataDir, 'feeConfigs.json'), 'utf-8')),
     auditEntries: JSON.parse(fs.readFileSync(path.join(dataDir, 'auditEntries.json'), 'utf-8')),
+    snapshots,
   };
 }
 
@@ -38,13 +47,20 @@ function generateId(): string {
   return Math.random().toString(16).substring(2) + Date.now().toString(16);
 }
 
-// Helper to normalize MongoDB _id to id
+// Helper to normalize MongoDB _id to id (recursively for nested arrays)
 function normalizeId(doc: any): any {
   if (!doc) return doc;
   const normalized = { ...doc };
   if (normalized._id) {
     normalized.id = normalized._id.$oid || normalized._id.toString() || normalized._id;
     delete normalized._id;
+  }
+  // Recursively normalize nested arrays (fees, invoices, etc.)
+  if (Array.isArray(normalized.fees)) {
+    normalized.fees = normalized.fees.map(normalizeId);
+  }
+  if (Array.isArray(normalized.invoices)) {
+    normalized.invoices = normalized.invoices.map(normalizeId);
   }
   return normalized;
 }
@@ -443,6 +459,19 @@ function calculateLoanPreview(loan: any, pricing?: any, feeChanges?: any) {
     }
   }
 
+  if (feeChanges?.updates) {
+    for (const upd of feeChanges.updates) {
+      const fee = loan.fees?.find((f: any) =>
+        (f._id?.$oid || f._id || f.id) === upd.feeId
+      );
+      if (fee) {
+        // Remove old amount and add new amount
+        totalFees -= fee.calculatedAmount || 0;
+        totalFees += upd.calculatedAmount || 0;
+      }
+    }
+  }
+
   if (feeChanges?.deletes) {
     for (const del of feeChanges.deletes) {
       const fee = loan.fees?.find((f: any) =>
@@ -582,6 +611,202 @@ app.get('/api/audit', (req: Request, res: Response) => {
     entries: normalizeIds(entries),
     total,
   });
+});
+
+// ============================================
+// SNAPSHOTS (Playback Feature)
+// ============================================
+
+/**
+ * Calculate summary for a set of loans (grouped by currency)
+ */
+function calculateSnapshotSummary(loans: any[]): Record<string, any> {
+  const summary: Record<string, any> = {};
+
+  for (const loan of loans) {
+    const currency = loan.currency || 'USD';
+    if (!summary[currency]) {
+      summary[currency] = {
+        loanCount: 0,
+        totalAmount: 0,
+        totalFees: 0,
+        totalInterest: 0,
+        netProceeds: 0,
+        avgRate: 0,
+      };
+    }
+    summary[currency].loanCount++;
+    summary[currency].totalAmount += loan.totalAmount || 0;
+    summary[currency].totalFees += loan.totalFees || 0;
+    summary[currency].totalInterest += loan.interestAmount || 0;
+    summary[currency].netProceeds += loan.netProceeds || 0;
+    summary[currency].avgRate += loan.pricing?.effectiveRate || 0;
+  }
+
+  // Calculate average rate per currency
+  for (const currency of Object.keys(summary)) {
+    if (summary[currency].loanCount > 0) {
+      summary[currency].avgRate = summary[currency].avgRate / summary[currency].loanCount;
+    }
+  }
+
+  return summary;
+}
+
+/**
+ * Calculate delta between two snapshots
+ */
+function calculateSnapshotDelta(
+  currentSummary: Record<string, any>,
+  previousSummary: Record<string, any> | null
+): Record<string, any> | null {
+  if (!previousSummary) return null;
+
+  const delta: Record<string, any> = {};
+
+  for (const currency of Object.keys(currentSummary)) {
+    const current = currentSummary[currency];
+    const previous = previousSummary[currency];
+
+    if (previous) {
+      delta[currency] = {
+        feesChange: current.totalFees - previous.totalFees,
+        interestChange: current.totalInterest - previous.totalInterest,
+        netProceedsChange: current.netProceeds - previous.netProceeds,
+        avgRateChange: Math.round((current.avgRate - previous.avgRate) * 100), // basis points
+      };
+    }
+  }
+
+  return Object.keys(delta).length > 0 ? delta : null;
+}
+
+// List snapshots for customer (timeline view)
+app.get('/api/snapshots', (req: Request, res: Response) => {
+  const { customerId, limit = '20', skip = '0' } = req.query;
+
+  let snapshots = [...data.snapshots];
+
+  if (customerId) {
+    snapshots = snapshots.filter(
+      (s) => (s.customerId?.$oid || s.customerId) === customerId
+    );
+  }
+
+  // Sort by timestamp descending (most recent first)
+  snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const total = snapshots.length;
+  const skipNum = parseInt(skip as string);
+  const limitNum = parseInt(limit as string);
+  const paginatedSnapshots = snapshots.slice(skipNum, skipNum + limitNum);
+
+  // Return summary data only (no loans)
+  const summaries = paginatedSnapshots.map((s) => ({
+    id: s._id || s.id,
+    customerId: s.customerId?.$oid || s.customerId,
+    timestamp: s.timestamp,
+    userId: s.userId,
+    userName: s.userName,
+    summary: s.summary,
+    delta: s.delta,
+    changes: s.changes || { fees: [], rates: [], invoices: [], statuses: [] },
+    changeCount: s.changeCount,
+    description: s.description,
+  }));
+
+  res.json({
+    snapshots: summaries,
+    total,
+    limit: limitNum,
+    skip: skipNum,
+  });
+});
+
+// Get single snapshot with loans (for playback)
+app.get('/api/snapshots/:id', (req: Request, res: Response) => {
+  const snapshot = data.snapshots.find(
+    (s) => (s._id || s.id) === req.params.id
+  );
+
+  if (!snapshot) {
+    return res.status(404).json({ error: 'Snapshot not found' });
+  }
+
+  // Return full snapshot with loans
+  res.json({
+    id: snapshot._id || snapshot.id,
+    customerId: snapshot.customerId?.$oid || snapshot.customerId,
+    timestamp: snapshot.timestamp,
+    userId: snapshot.userId,
+    userName: snapshot.userName,
+    summary: snapshot.summary,
+    delta: snapshot.delta,
+    changes: snapshot.changes || { fees: [], rates: [], invoices: [], statuses: [] },
+    changeCount: snapshot.changeCount,
+    description: snapshot.description,
+    loans: normalizeIds(snapshot.loans || []),
+  });
+});
+
+// Create new snapshot
+app.post('/api/snapshots', (req: Request, res: Response) => {
+  const { customerId, loans, changes, changeCount = 0, description } = req.body;
+
+  if (!customerId || !loans) {
+    return res.status(400).json({ error: 'customerId and loans are required' });
+  }
+
+  // Calculate summary
+  const summary = calculateSnapshotSummary(loans);
+
+  // Get previous snapshot for delta calculation
+  const previousSnapshots = data.snapshots
+    .filter((s) => (s.customerId?.$oid || s.customerId) === customerId)
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const previousSnapshot = previousSnapshots[0] || null;
+  const previousSummary = previousSnapshot?.summary || null;
+
+  // Calculate delta
+  const delta = calculateSnapshotDelta(summary, previousSummary);
+
+  const newSnapshot = {
+    _id: generateId(),
+    customerId,
+    timestamp: new Date().toISOString(),
+    userId: req.headers['x-user-id'] || 'user-1',
+    userName: req.headers['x-user-name'] || 'Demo User',
+    summary,
+    delta,
+    changes: changes || { fees: [], rates: [], invoices: [], statuses: [] },
+    changeCount,
+    description,
+    loans: loans.map((l: any) => ({ ...l })), // Store a copy of loans
+  };
+
+  data.snapshots.unshift(newSnapshot);
+
+  // Return summary only
+  res.status(201).json({
+    id: newSnapshot._id,
+    customerId: newSnapshot.customerId,
+    timestamp: newSnapshot.timestamp,
+    userId: newSnapshot.userId,
+    userName: newSnapshot.userName,
+    summary: newSnapshot.summary,
+    delta: newSnapshot.delta,
+    changes: newSnapshot.changes,
+    changeCount: newSnapshot.changeCount,
+    description: newSnapshot.description,
+  });
+});
+
+// Delete all snapshots (for test cleanup)
+app.delete('/api/snapshots/all', (_req: Request, res: Response) => {
+  const deletedCount = data.snapshots.length;
+  data.snapshots = [];
+  res.json({ deleted: deletedCount, message: 'All snapshots deleted' });
 });
 
 // ============================================

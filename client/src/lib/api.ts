@@ -1,3 +1,49 @@
+/**
+ * @fileoverview API Client - Backend Communication Layer
+ *
+ * This module provides a type-safe API client for all backend operations.
+ * It is the single point of communication between the frontend and server.
+ *
+ * ARCHITECTURE:
+ * ```
+ * Component → API Client → Express Server → MongoDB
+ *                ↓
+ *         [Type-safe requests with shared types]
+ * ```
+ *
+ * API ENDPOINTS BY DOMAIN:
+ * - Loans: CRUD, pricing preview, batch operations, splitting
+ * - Fees: Add, update, remove fees from loans
+ * - Invoices: Add, update, remove, move between loans
+ * - Fee Configs: Template fee configurations
+ * - Currencies: Currency list and FX rates
+ * - Customers: Customer management with loan aggregation
+ * - Snapshots: Historical snapshots for playback feature
+ *
+ * ERROR HANDLING:
+ * All API calls throw errors with message from server response.
+ * Consumers should wrap calls in try/catch.
+ *
+ * AUTHENTICATION:
+ * Currently uses demo headers (X-User-Id, X-User-Name).
+ * TODO: Replace with real authentication system.
+ *
+ * @module lib/api
+ * @see @loan-pricing/shared - Type definitions shared with backend
+ *
+ * @example
+ * // Fetch loans with filtering
+ * const { data, total } = await getLoans({ status: 'active' });
+ *
+ * @example
+ * // Preview pricing changes
+ * const preview = await previewFullLoanState(loanId, { baseRate: 0.06 }, feeChanges);
+ *
+ * @example
+ * // Batch update multiple loans
+ * const { results } = await batchUpdateLoans(items);
+ */
+
 import type {
   Loan,
   LoanListItem,
@@ -11,8 +57,13 @@ import type {
   SplitLoanRequest,
   CalculatePricingResponse,
   LoanPricing,
+  SnapshotSummary,
+  Snapshot,
+  SnapshotListResponse,
+  CreateSnapshotRequest,
 } from '@loan-pricing/shared';
 
+/** Base URL for all API requests */
 const API_BASE = '/api';
 
 // ============================================
@@ -346,4 +397,37 @@ export async function getCustomers(): Promise<Customer[]> {
 
 export async function getCustomerWithLoans(id: string): Promise<CustomerWithLoans> {
   return request<CustomerWithLoans>(`/customers/${id}`);
+}
+
+// ============================================
+// SNAPSHOTS API (Playback Feature)
+// ============================================
+
+/**
+ * Get snapshots for a customer (timeline data without loan data)
+ */
+export async function getSnapshots(
+  customerId: string,
+  params?: { limit?: number; skip?: number }
+): Promise<SnapshotListResponse> {
+  return request<SnapshotListResponse>(
+    `/snapshots${buildQueryString({ customerId, ...params })}`
+  );
+}
+
+/**
+ * Get a single snapshot with decompressed loans (for playback mode)
+ */
+export async function getSnapshot(id: string): Promise<Snapshot> {
+  return request<Snapshot>(`/snapshots/${id}`);
+}
+
+/**
+ * Create a new snapshot after saving changes
+ */
+export async function createSnapshot(data: CreateSnapshotRequest): Promise<SnapshotSummary> {
+  return request<SnapshotSummary>('/snapshots', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }

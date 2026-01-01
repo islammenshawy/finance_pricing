@@ -85,3 +85,28 @@ export type { GridToolbarProps } from './GridToolbar';
 export { useGridKeyboard } from './useGridKeyboard';
 export type { GridKeyboardOptions, GridKeyboardState, GridKeyboardReturn } from './useGridKeyboard';
 export type { KeyboardConfig, KeyboardAction, KeyBinding } from './types';
+
+// Collapsible section for nested data (invoices, line items, etc.)
+export { CollapsibleDataSection } from './CollapsibleDataSection';
+export type { CollapsibleDataSectionProps, SectionSearchConfig } from './CollapsibleDataSection';
+
+// =============================================================================
+// MODULAR FEATURES (Tree-shakeable, lazy-loadable)
+// =============================================================================
+
+// Features - each can be imported individually for optimal bundle size
+export * from './features';
+
+// Module System - for dynamic feature loading
+export {
+  moduleLoaders,
+  modulePresets,
+  loadGridModules,
+  estimateBundleSize,
+  getEnabledModules,
+  LazyComponents,
+  type GridModuleName,
+  type GridModuleConfig,
+  type GridModules,
+  type LoadedModule,
+} from './modules';

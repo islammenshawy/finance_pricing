@@ -1,3 +1,30 @@
+/**
+ * @fileoverview Calculation Service - Core Financial Calculations
+ *
+ * This service handles all financial calculations for the loan pricing system.
+ * It is the single source of truth for:
+ * - Interest calculations (simple and compound)
+ * - Fee calculations (flat, percentage, tiered)
+ * - Net proceeds calculations
+ * - Day count conventions (30/360, actual/360, actual/365)
+ *
+ * @module services/calculationService
+ * @requires models - Database models for loans and fees
+ * @requires @loan-pricing/shared - Shared type definitions
+ *
+ * @example
+ * // Recalculate a loan after pricing change
+ * await recalculateLoan(loan);
+ *
+ * @example
+ * // Preview pricing without saving
+ * const preview = previewPricing(loan, { baseRate: 0.05, spread: 0.02 });
+ *
+ * @example
+ * // Preview full loan state with fee changes
+ * const fullPreview = await previewFullLoanState(loan, pricingUpdates, feeChanges);
+ */
+
 import type { LoanDocument, FeeSubdocument } from '../models';
 import type { LoanPricing, FeeTier } from '@loan-pricing/shared';
 import { FxRate, FeeConfig } from '../models';

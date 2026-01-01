@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Fee } from '@loan-pricing/shared';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ interface FeeRowProps {
   isLocked: boolean;
   isPending: boolean;
   isDeleted?: boolean;
+  isNew?: boolean; // Fee was added in this snapshot (playback mode)
   updates?: Partial<Fee>;
   onUpdate: (updates: Partial<Fee>) => void;
   onRemove: () => void;
@@ -28,21 +29,37 @@ export function FeeRow({
   isLocked,
   isPending,
   isDeleted,
+  isNew,
   updates,
   onUpdate,
   onRemove,
   onRevert,
 }: FeeRowProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState(fee.calculatedAmount.toString());
+  const [editValue, setEditValue] = useState('');
 
   // Get display amount (from updates if present)
   const displayAmount = updates?.calculatedAmount ?? fee.calculatedAmount;
   const hasAmountChange = updates?.calculatedAmount !== undefined && updates.calculatedAmount !== fee.calculatedAmount;
 
+  // Reset edit state when fee changes OR when displayAmount changes from external update
+  // This ensures each fee maintains its own isolated state
+  useEffect(() => {
+    // Only reset if not currently editing (don't interrupt user input)
+    if (!isEditing) {
+      setEditValue(displayAmount.toString());
+    }
+  }, [fee.id, displayAmount, isEditing]);
+
+  // Reset editing state when fee.id changes (different fee)
+  useEffect(() => {
+    setIsEditing(false);
+  }, [fee.id]);
+
   const handleSave = () => {
     const newAmount = parseFloat(editValue);
-    if (!isNaN(newAmount) && newAmount !== fee.calculatedAmount) {
+    // Compare with displayAmount (current value) not fee.calculatedAmount (original)
+    if (!isNaN(newAmount) && newAmount !== displayAmount) {
       onUpdate({ calculatedAmount: newAmount, isOverridden: true });
     }
     setIsEditing(false);
@@ -81,20 +98,33 @@ export function FeeRow({
     );
   }
 
+  // Determine background styling based on state
+  const getBackgroundClass = () => {
+    if (isNew) {
+      return 'bg-green-50 dark:bg-green-950/30 border-green-300 dark:border-green-800';
+    }
+    if (hasAmountChange) {
+      return 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800';
+    }
+    return 'bg-card';
+  };
+
   return (
-    <div className={`flex items-center gap-3 p-2 border rounded-md transition-colors ${
-      isPending ? 'opacity-50' : ''
-    } ${
-      hasAmountChange
-        ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-800'
-        : 'bg-card'
-    }`}>
+    <div
+      data-testid={`fee-row-${fee.id}`}
+      className={`flex items-center gap-3 p-2 border rounded-md transition-colors min-h-[52px] ${
+        isPending ? 'opacity-50' : ''
+      } ${getBackgroundClass()}`}
+    >
       <div className="flex-1">
-        <div className="font-medium text-sm">{fee.name}</div>
+        <div className="font-medium text-sm">
+          {fee.name}
+          {isNew && <Badge className="ml-2 bg-green-500 text-white text-xs">New</Badge>}
+        </div>
         <div className="text-xs text-muted-foreground">
           {fee.code} - {fee.calculationType === 'percentage' ? formatPercent(fee.rate || 0) : 'Fixed'}
           {fee.isOverridden && <Badge variant="outline" className="ml-2 text-xs">Overridden</Badge>}
-          {hasAmountChange && <Badge className="ml-2 bg-amber-500 text-white text-xs">Modified</Badge>}
+          {hasAmountChange && !isNew && <Badge className="ml-2 bg-amber-500 text-white text-xs">Modified</Badge>}
         </div>
       </div>
       <div className="text-right">
@@ -120,10 +150,13 @@ export function FeeRow({
           </div>
         ) : (
           <div className="flex flex-col items-end">
-            <span className={`font-mono font-medium ${hasAmountChange ? 'text-amber-700 dark:text-amber-300' : ''}`}>
+            <span className={`font-mono font-medium ${
+              isNew ? 'text-green-700 dark:text-green-300' :
+              hasAmountChange ? 'text-amber-700 dark:text-amber-300' : ''
+            }`}>
               {formatCurrency(displayAmount, currency)}
             </span>
-            {hasAmountChange && (
+            {hasAmountChange && !isNew && (
               <span className="text-xs text-muted-foreground line-through">
                 {formatCurrency(fee.calculatedAmount, currency)}
               </span>

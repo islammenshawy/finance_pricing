@@ -76,10 +76,24 @@ export default defineConfig({
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
     }),
     // Module Federation for MFE
+    // Exposes granular components for flexible consumption by host applications
     new rspack.container.ModuleFederationPlugin({
       name: 'loanPricing',
       filename: 'remoteEntry.js',
       exposes: {
+        // UI Primitives - Basic building blocks (SearchBar, Button, Input, etc.)
+        './ui': './src/mfe/index.ts',
+
+        // Grid System - DataGrid, Toolbar, Cells for tabular data
+        './grid': './src/mfe/grid.ts',
+
+        // Pages - Full page components (LoanPricingPage, CustomerPage)
+        './pages': './src/mfe/pages.ts',
+
+        // Hooks - State management and business logic hooks
+        './hooks': './src/mfe/hooks.ts',
+
+        // Legacy exports (for backwards compatibility)
         './LoanPricingPage': './src/components/pricing/LoanPricingPage.tsx',
         './CustomerPage': './src/components/customers/CustomerPage.tsx',
       },
@@ -95,7 +109,10 @@ export default defineConfig({
         '@tanstack/react-query': {
           singleton: true,
         },
-        zustand: {
+        'react-redux': {
+          singleton: true,
+        },
+        '@reduxjs/toolkit': {
           singleton: true,
         },
       },
@@ -106,6 +123,7 @@ export default defineConfig({
     port: 4000,
     hot: true,
     historyApiFallback: true,
+    allowedHosts: 'all', // Allow Docker host.docker.internal for visual regression testing
     proxy: [
       {
         context: ['/api'],

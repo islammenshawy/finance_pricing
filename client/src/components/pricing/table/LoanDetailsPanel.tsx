@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Loan, Fee, FeeConfig, AuditEntry, Invoice } from '@loan-pricing/shared';
 import { formatCurrency, formatPercent } from '@/lib/utils';
 import { getLoanAudit, removeInvoice, addInvoiceToLoan, updateInvoice } from '@/lib/api';
@@ -11,6 +11,7 @@ import { MoveInvoiceDialog } from '../MoveInvoiceDialog';
 import { FeeRow } from './FeeRow';
 import { GroupedAuditHistory } from '../audit/GroupedAuditHistory';
 import type { PreviewData } from '@/types/pricing';
+import { DataGrid, type Column } from '@/components/ui/DataGrid';
 
 interface LoanDetailsPanelProps {
   loan: Loan;
@@ -18,6 +19,7 @@ interface LoanDetailsPanelProps {
   feeConfigs: FeeConfig[];
   preview?: PreviewData;
   isLocked: boolean;
+  readOnly?: boolean;
   onAddFee: (loanId: string, feeConfigId: string) => void;
   onUpdateFee: (loanId: string, feeId: string, updates: Partial<Fee>) => void;
   onRemoveFee: (loanId: string, feeId: string) => void;
@@ -25,6 +27,7 @@ interface LoanDetailsPanelProps {
   pendingFeeAdds: FeeChange[];
   isFeeDeleted: (feeId: string) => boolean;
   getFeeUpdates: (feeId: string) => Partial<Fee> | undefined;
+  isNewFee?: (feeId: string) => boolean;
 }
 
 /**
@@ -36,6 +39,7 @@ export function LoanDetailsPanel({
   feeConfigs,
   preview,
   isLocked,
+  readOnly = false,
   onAddFee,
   onUpdateFee,
   onRemoveFee,
@@ -43,6 +47,7 @@ export function LoanDetailsPanel({
   pendingFeeAdds,
   isFeeDeleted,
   getFeeUpdates,
+  isNewFee,
 }: LoanDetailsPanelProps) {
   const { revertFeeChange, isFieldModified, getNewValue } = useChangeStore();
   const [addingFee, setAddingFee] = useState(false);
@@ -88,6 +93,157 @@ export function LoanDetailsPanel({
       !pendingAddConfigIds.has(config.id)
   );
 
+  // Whether actions are editable
+  const canEdit = !isLocked && !readOnly && !!onInvoiceChange;
+
+  // Invoice columns for DataGrid - widths match original table layout
+  const invoiceColumns: Column<Invoice>[] = useMemo(() => {
+    const baseColumns: Column<Invoice>[] = [
+      {
+        id: 'invoiceNumber',
+        header: 'Invoice #',
+        width: 160,
+        cell: (invoice) => (
+          <span className="font-medium text-primary whitespace-nowrap">{invoice.invoiceNumber}</span>
+        ),
+      },
+      {
+        id: 'description',
+        header: 'Description',
+        width: 120,
+        cell: (invoice) => (
+          <span className="text-muted-foreground truncate block" title={invoice.description}>
+            {invoice.description || '-'}
+          </span>
+        ),
+      },
+      {
+        id: 'debtor',
+        header: 'Debtor',
+        minWidth: 150,
+        cell: (invoice) => (
+          <span className="truncate block">{invoice.debtorName || invoice.buyerName}</span>
+        ),
+      },
+      {
+        id: 'amount',
+        header: 'Amount',
+        width: 110,
+        align: 'right' as const,
+        cell: (invoice) => (
+          <span className="font-mono whitespace-nowrap">{formatCurrency(invoice.amount, loan.currency)}</span>
+        ),
+      },
+      {
+        id: 'dueDate',
+        header: 'Due Date',
+        width: 90,
+        align: 'center' as const,
+        cell: (invoice) => (
+          <span className="text-muted-foreground whitespace-nowrap">
+            {new Date(invoice.dueDate).toLocaleDateString()}
+          </span>
+        ),
+      },
+      {
+        id: 'days',
+        header: 'Days',
+        width: 60,
+        align: 'center' as const,
+        cell: (invoice) => {
+          const daysUntil = Math.ceil(
+            (new Date(invoice.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+          );
+          return (
+            <Badge variant={daysUntil < 30 ? 'destructive' : 'secondary'} className="text-xs">
+              {daysUntil}d
+            </Badge>
+          );
+        },
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        width: 80,
+        align: 'center' as const,
+        cell: (invoice) => (
+          <Badge
+            variant={
+              invoice.verificationStatus === 'verified'
+                ? 'default'
+                : invoice.verificationStatus === 'rejected'
+                ? 'destructive'
+                : 'secondary'
+            }
+            className="text-xs capitalize"
+          >
+            {invoice.verificationStatus || 'pending'}
+          </Badge>
+        ),
+      },
+    ];
+
+    if (canEdit) {
+      baseColumns.push({
+        id: 'actions',
+        header: 'Actions',
+        width: 90,
+        align: 'right' as const,
+        cell: (invoice) => (
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0"
+              title="Edit invoice"
+              onClick={() => {
+                const amountStr = prompt('New Amount:', invoice.amount.toString());
+                if (amountStr && parseFloat(amountStr) !== invoice.amount) {
+                  updateInvoice(loan.id, invoice.id, { amount: parseFloat(amountStr) })
+                    .then(() => onInvoiceChange?.())
+                    .catch(console.error);
+                }
+              }}
+            >
+              <Pencil className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-blue-500 hover:text-blue-700"
+              title="Move to another loan"
+              onClick={() => {
+                setSelectedInvoiceForMove(invoice);
+                setMoveInvoiceDialogOpen(true);
+              }}
+            >
+              <ArrowRightLeft className="h-3 w-3" />
+            </Button>
+            {loan.invoices.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
+                title="Remove invoice"
+                onClick={() => {
+                  if (confirm(`Delete invoice ${invoice.invoiceNumber}?`)) {
+                    removeInvoice(loan.id, invoice.id)
+                      .then(() => onInvoiceChange?.())
+                      .catch(console.error);
+                  }
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        ),
+      });
+    }
+
+    return baseColumns;
+  }, [loan.currency, loan.id, loan.invoices.length, canEdit, onInvoiceChange]);
+
   const handleAddFee = () => {
     if (!selectedFeeConfig) return;
     onAddFee(loan.id, selectedFeeConfig);
@@ -109,7 +265,7 @@ export function LoanDetailsPanel({
             <Badge variant="secondary" className="text-xs">
               {formatCurrency(loan.invoices.reduce((sum, inv) => sum + inv.amount, 0), loan.currency)}
             </Badge>
-            {!isLocked && onInvoiceChange && (
+            {!isLocked && !readOnly && onInvoiceChange && (
               <Button
                 variant="outline"
                 size="sm"
@@ -135,111 +291,14 @@ export function LoanDetailsPanel({
             )}
           </div>
         </div>
-        <div className="bg-card border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Invoice #</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Description</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">Debtor</th>
-                <th className="px-3 py-2 text-right font-medium text-muted-foreground">Amount</th>
-                <th className="px-3 py-2 text-center font-medium text-muted-foreground">Due Date</th>
-                <th className="px-3 py-2 text-center font-medium text-muted-foreground">Days</th>
-                <th className="px-3 py-2 text-center font-medium text-muted-foreground">Status</th>
-                {!isLocked && onInvoiceChange && (
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Actions</th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {loan.invoices.map((invoice) => (
-                <tr key={invoice.id} className="hover:bg-muted/20">
-                  <td className="px-3 py-2 font-medium text-primary">{invoice.invoiceNumber}</td>
-                  <td className="px-3 py-2 text-muted-foreground max-w-[200px] truncate" title={invoice.description}>
-                    {invoice.description || '-'}
-                  </td>
-                  <td className="px-3 py-2">{invoice.debtorName || invoice.buyerName}</td>
-                  <td className="px-3 py-2 text-right font-mono">{formatCurrency(invoice.amount, loan.currency)}</td>
-                  <td className="px-3 py-2 text-center text-muted-foreground">
-                    {new Date(invoice.dueDate).toLocaleDateString()}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    {(() => {
-                      const daysUntil = Math.ceil((new Date(invoice.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                      return (
-                        <Badge variant={daysUntil < 30 ? 'destructive' : 'secondary'} className="text-xs">
-                          {daysUntil}d
-                        </Badge>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <Badge
-                      variant={
-                        invoice.verificationStatus === 'verified' ? 'default' :
-                        invoice.verificationStatus === 'rejected' ? 'destructive' : 'secondary'
-                      }
-                      className="text-xs capitalize"
-                    >
-                      {invoice.verificationStatus || 'pending'}
-                    </Badge>
-                  </td>
-                  {!isLocked && onInvoiceChange && (
-                    <td className="px-3 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          title="Edit invoice"
-                          onClick={() => {
-                            const amountStr = prompt('New Amount:', invoice.amount.toString());
-                            if (amountStr && parseFloat(amountStr) !== invoice.amount) {
-                              updateInvoice(loan.id, invoice.id, { amount: parseFloat(amountStr) })
-                                .then(() => onInvoiceChange())
-                                .catch(console.error);
-                            }
-                          }}
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 text-blue-500 hover:text-blue-700"
-                          title="Move to another loan"
-                          onClick={() => {
-                            setSelectedInvoiceForMove(invoice);
-                            setMoveInvoiceDialogOpen(true);
-                          }}
-                        >
-                          <ArrowRightLeft className="h-3 w-3" />
-                        </Button>
-                        {loan.invoices.length > 1 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
-                            title="Remove invoice"
-                            onClick={() => {
-                              if (confirm(`Delete invoice ${invoice.invoiceNumber}?`)) {
-                                removeInvoice(loan.id, invoice.id)
-                                  .then(() => onInvoiceChange())
-                                  .catch(console.error);
-                              }
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataGrid
+          data={loan.invoices}
+          columns={invoiceColumns}
+          getRowKey={(invoice) => invoice.id}
+          emptyMessage="No invoices"
+          hoverable
+          className="text-sm"
+        />
 
         {/* Move Invoice Dialog */}
         {selectedInvoiceForMove && (
@@ -264,7 +323,7 @@ export function LoanDetailsPanel({
         <div>
           <div className="flex items-center justify-between mb-3">
             <h4 className="font-semibold text-sm">Fees</h4>
-            {!isLocked && !addingFee && availableFeeConfigs.length > 0 && (
+            {!isLocked && !readOnly && !addingFee && availableFeeConfigs.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -285,14 +344,16 @@ export function LoanDetailsPanel({
               {loan.fees.map((fee) => {
                 const isDeleted = isFeeDeleted(fee.id);
                 const updates = getFeeUpdates(fee.id);
+                const isNew = isNewFee?.(fee.id) ?? false;
                 return (
                   <FeeRow
-                    key={fee.id}
+                    key={`${loan.id}-${fee.id}`}
                     fee={fee}
                     currency={loan.currency}
-                    isLocked={isLocked}
+                    isLocked={isLocked || readOnly}
                     isPending={false}
                     isDeleted={isDeleted}
+                    isNew={isNew}
                     updates={updates}
                     onUpdate={(upd) => onUpdateFee(loan.id, fee.id, upd)}
                     onRemove={() => handleRemoveFee(fee.id)}
@@ -308,7 +369,7 @@ export function LoanDetailsPanel({
               })}
 
               {/* Pending fee adds */}
-              {pendingFeeAdds.map((pending) => {
+              {!readOnly && pendingFeeAdds.map((pending) => {
                 const config = feeConfigs.find((c) => c.id === pending.feeConfigId);
                 let expectedAmount = 0;
                 let rateDisplay = '';
@@ -357,7 +418,7 @@ export function LoanDetailsPanel({
               })}
 
               {/* Add Fee Form */}
-              {addingFee && (
+              {!readOnly && addingFee && (
                 <div className="flex items-center gap-2 p-2 bg-muted/30 rounded-md">
                   <Select value={selectedFeeConfig} onValueChange={setSelectedFeeConfig}>
                     <SelectTrigger className="flex-1 h-8">

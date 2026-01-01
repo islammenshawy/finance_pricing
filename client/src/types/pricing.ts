@@ -8,7 +8,13 @@
  */
 export interface PreviewData {
   effectiveRate: number;
+  originalEffectiveRate?: number;
+  baseRate?: number;
+  originalBaseRate?: number;
+  spread?: number;
+  originalSpread?: number;
   interestAmount: number;
+  originalInterestAmount?: number;
   totalFees: number;
   originalTotalFees?: number;
   netProceeds: number;

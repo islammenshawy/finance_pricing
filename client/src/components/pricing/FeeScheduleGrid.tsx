@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Fee } from '@loan-pricing/shared';
 import { getFeeConfigs, addFeeToLoan, updateFee, removeFee } from '@/lib/api';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
+import { DataGrid, type Column } from '@/components/ui/DataGrid';
 
 interface FeeScheduleGridProps {
   loanId: string;
@@ -95,158 +96,180 @@ export function FeeScheduleGrid({ loanId, fees, currency }: FeeScheduleGridProps
     (config) => !fees.some((fee) => fee.feeConfigId === config.id)
   );
 
+  // Define columns for DataGrid
+  const columns: Column<Fee>[] = useMemo(
+    () => [
+      {
+        id: 'code',
+        header: 'Code',
+        width: 80,
+        cell: (fee) => <Badge variant="outline">{fee.code}</Badge>,
+      },
+      {
+        id: 'name',
+        header: 'Name',
+        cell: (fee) => fee.name,
+      },
+      {
+        id: 'type',
+        header: 'Type',
+        width: 100,
+        cell: (fee) => <span className="capitalize">{fee.calculationType}</span>,
+      },
+      {
+        id: 'rateAmount',
+        header: 'Rate/Amount',
+        width: 180,
+        cell: (fee) => {
+          if (editingFeeId === fee.id) {
+            return (
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  value={editingValue}
+                  onChange={(e) => setEditingValue(e.target.value)}
+                  className="w-24 h-8"
+                  autoFocus
+                />
+                <span className="text-xs text-muted-foreground">
+                  {fee.calculationType === 'percentage' ? '%' : currency}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => handleSaveEdit(fee)}
+                >
+                  <Check className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => setEditingFeeId(null)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            );
+          }
+          return (
+            <div className="flex items-center gap-2">
+              <span className="font-mono">
+                {fee.calculationType === 'flat'
+                  ? formatCurrency(fee.flatAmount ?? 0, fee.currency)
+                  : fee.calculationType === 'percentage'
+                  ? formatPercent(fee.rate ?? 0)
+                  : 'Tiered'}
+              </span>
+              {fee.isOverridden && (
+                <Badge variant="outline" className="text-xs">
+                  Override
+                </Badge>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        id: 'calculated',
+        header: 'Calculated',
+        width: 120,
+        align: 'right' as const,
+        cell: (fee) => (
+          <span className="font-mono">
+            {fee.isWaived ? (
+              <span className="text-muted-foreground line-through">
+                {formatCurrency(fee.calculatedAmount, fee.currency)}
+              </span>
+            ) : (
+              formatCurrency(fee.calculatedAmount, fee.currency)
+            )}
+          </span>
+        ),
+      },
+      {
+        id: 'status',
+        header: 'Status',
+        width: 100,
+        cell: (fee) => {
+          if (fee.isPaid) {
+            return <Badge variant="approved">Paid</Badge>;
+          }
+          if (fee.isWaived) {
+            return <Badge variant="secondary">Waived</Badge>;
+          }
+          return <Badge variant="pending">Pending</Badge>;
+        },
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        width: 100,
+        cell: (fee) => (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => handleStartEdit(fee)}
+              disabled={fee.calculationType === 'tiered'}
+            >
+              <Edit2 className="h-3 w-3" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => handleToggleWaived(fee)}
+            >
+              {fee.isWaived ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-destructive"
+              onClick={() => handleRemoveFee(fee.id)}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [editingFeeId, editingValue, currency]
+  );
+
+  const totalFees = fees.reduce(
+    (sum, fee) => sum + (fee.isWaived ? 0 : fee.calculatedAmount),
+    0
+  );
+
   return (
     <div className="border rounded-lg overflow-hidden">
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Rate/Amount</th>
-            <th>Calculated</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fees.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="text-center text-muted-foreground py-8">
-                No fees configured
-              </td>
-            </tr>
-          ) : (
-            fees.map((fee) => (
-              <tr key={fee.id} className={fee.isWaived ? 'opacity-50' : ''}>
-                <td>
-                  <Badge variant="outline">{fee.code}</Badge>
-                </td>
-                <td>{fee.name}</td>
-                <td className="capitalize">{fee.calculationType}</td>
-                <td>
-                  {editingFeeId === fee.id ? (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        value={editingValue}
-                        onChange={(e) => setEditingValue(e.target.value)}
-                        className="w-24 h-8"
-                        autoFocus
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {fee.calculationType === 'percentage' ? '%' : currency}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => handleSaveEdit(fee)}
-                      >
-                        <Check className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => setEditingFeeId(null)}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono">
-                        {fee.calculationType === 'flat'
-                          ? formatCurrency(fee.flatAmount ?? 0, fee.currency)
-                          : fee.calculationType === 'percentage'
-                          ? formatPercent(fee.rate ?? 0)
-                          : 'Tiered'}
-                      </span>
-                      {fee.isOverridden && (
-                        <Badge variant="outline" className="text-xs">
-                          Override
-                        </Badge>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td className="font-mono">
-                  {fee.isWaived ? (
-                    <span className="text-muted-foreground line-through">
-                      {formatCurrency(fee.calculatedAmount, fee.currency)}
-                    </span>
-                  ) : (
-                    formatCurrency(fee.calculatedAmount, fee.currency)
-                  )}
-                </td>
-                <td>
-                  {fee.isPaid ? (
-                    <Badge variant="approved">Paid</Badge>
-                  ) : fee.isWaived ? (
-                    <Badge variant="secondary">Waived</Badge>
-                  ) : (
-                    <Badge variant="pending">Pending</Badge>
-                  )}
-                </td>
-                <td>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleStartEdit(fee)}
-                      disabled={fee.calculationType === 'tiered'}
-                    >
-                      <Edit2 className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                      onClick={() => handleToggleWaived(fee)}
-                    >
-                      {fee.isWaived ? (
-                        <Check className="h-3 w-3" />
-                      ) : (
-                        <X className="h-3 w-3" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-destructive"
-                      onClick={() => handleRemoveFee(fee.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-        <tfoot>
-          <tr className="bg-muted/30">
-            <td colSpan={4} className="text-right font-medium">
-              Total Fees
-            </td>
-            <td className="font-mono font-semibold">
-              {formatCurrency(
-                fees.reduce((sum, fee) => sum + (fee.isWaived ? 0 : fee.calculatedAmount), 0),
-                currency
-              )}
-            </td>
-            <td></td>
-            <td>
+      <DataGrid
+        data={fees}
+        columns={columns}
+        getRowKey={(fee) => fee.id}
+        emptyMessage="No fees configured"
+        rowClassName={(fee) => (fee.isWaived ? 'opacity-50' : '')}
+        hoverable
+        renderFooter={() => (
+          <div className="grid gap-3 px-3 py-2" style={{ gridTemplateColumns: '80px 1fr 100px 180px 120px 100px 100px' }}>
+            <div className="col-span-4 text-right font-medium">Total Fees</div>
+            <div className="font-mono font-semibold text-right">
+              {formatCurrency(totalFees, currency)}
+            </div>
+            <div></div>
+            <div>
               <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
                 <Plus className="h-3 w-3 mr-1" />
                 Add
               </Button>
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+            </div>
+          </div>
+        )}
+      />
 
       {/* Add Fee Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>

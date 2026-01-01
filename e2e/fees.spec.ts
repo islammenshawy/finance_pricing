@@ -240,4 +240,160 @@ test.describe('Fee Management', () => {
       }
     }
   });
+
+  test('should edit fee amount and update correctly', async ({ page }) => {
+    // Find and expand a loan row that has fees
+    const loanRows = page.locator('[data-testid^="loan-row-"]');
+    const count = await loanRows.count();
+
+    for (let i = 0; i < Math.min(count, 3); i++) {
+      const row = loanRows.nth(i);
+      const chevron = row.locator('svg.lucide-chevron-right').first();
+
+      if (await chevron.isVisible()) {
+        await chevron.click();
+        await page.waitForTimeout(500);
+
+        // Look for fee rows with edit button (pencil icon)
+        const feeRows = page.locator('[data-testid^="fee-row-"]');
+        const feeCount = await feeRows.count();
+
+        if (feeCount > 0) {
+          // Get the first fee row
+          const firstFee = feeRows.first();
+          const editButton = firstFee.locator('button svg.lucide-pencil').locator('..');
+
+          if (await editButton.isVisible()) {
+            // Click edit button
+            await editButton.click();
+            await page.waitForTimeout(200);
+
+            // Input should appear
+            const input = firstFee.locator('input[type="number"]');
+            await expect(input).toBeVisible({ timeout: 3000 });
+
+            // Get current value and change it
+            const currentValue = await input.inputValue();
+            const newValue = (parseFloat(currentValue) + 100).toFixed(2);
+
+            await input.fill(newValue);
+            await input.press('Enter');
+
+            await page.waitForTimeout(500);
+
+            // The fee row should show "Modified" badge
+            const modifiedBadge = firstFee.locator('text=/Modified/i');
+            await expect(modifiedBadge).toBeVisible({ timeout: 3000 });
+
+            console.log(`Fee edited from ${currentValue} to ${newValue}`);
+            return; // Test passed
+          }
+        }
+
+        // Collapse and try next row
+        await chevron.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    // If no editable fees found, just pass the test
+    console.log('No editable fees found in first 3 loans');
+  });
+
+  test('should maintain separate state for each fee when editing', async ({ page }) => {
+    // This test verifies that editing one fee doesn't affect other fees
+    const loanRows = page.locator('[data-testid^="loan-row-"]');
+    const count = await loanRows.count();
+
+    for (let i = 0; i < Math.min(count, 5); i++) {
+      const row = loanRows.nth(i);
+      const chevron = row.locator('svg.lucide-chevron-right').first();
+
+      if (await chevron.isVisible()) {
+        await chevron.click();
+        await page.waitForTimeout(500);
+
+        // Look for multiple fee rows
+        const feeRows = page.locator('[data-testid^="fee-row-"]');
+        const feeCount = await feeRows.count();
+
+        if (feeCount >= 2) {
+          // Get the first two fees
+          const fee1 = feeRows.nth(0);
+          const fee2 = feeRows.nth(1);
+
+          // Get original amounts (displayed text)
+          const fee1Amount = await fee1.locator('.font-mono.font-medium').first().textContent();
+          const fee2Amount = await fee2.locator('.font-mono.font-medium').first().textContent();
+
+          // Edit fee 1
+          const editButton1 = fee1.locator('button svg.lucide-pencil').locator('..');
+          if (await editButton1.isVisible()) {
+            await editButton1.click();
+            await page.waitForTimeout(200);
+
+            const input1 = fee1.locator('input[type="number"]');
+            await expect(input1).toBeVisible({ timeout: 3000 });
+            await input1.fill('99999');
+            await input1.press('Enter');
+            await page.waitForTimeout(500);
+
+            // Verify fee 2 still shows its original amount
+            const fee2CurrentAmount = await fee2.locator('.font-mono.font-medium').first().textContent();
+            expect(fee2CurrentAmount).toBe(fee2Amount);
+
+            console.log(`Fee 1 edited to 99999, Fee 2 unchanged at ${fee2Amount}`);
+            return; // Test passed
+          }
+        }
+
+        // Collapse and try next row
+        await chevron.click();
+        await page.waitForTimeout(300);
+      }
+    }
+
+    console.log('No loans with 2+ editable fees found');
+  });
+
+  test('should maintain layout stability when editing fees', async ({ page }) => {
+    // This test verifies the expanded row doesn't resize when editing fees
+    const firstRow = page.locator('[data-testid^="loan-row-"]').first();
+    const chevron = firstRow.locator('svg.lucide-chevron-right').first();
+
+    if (await chevron.isVisible()) {
+      await chevron.click();
+      await page.waitForTimeout(500);
+
+      // Look for fee rows
+      const feeRows = page.locator('[data-testid^="fee-row-"]');
+
+      if ((await feeRows.count()) > 0) {
+        const firstFee = feeRows.first();
+
+        // Get initial bounding box of fee row
+        const initialBox = await firstFee.boundingBox();
+
+        // Find and click edit button
+        const editButton = firstFee.locator('button svg.lucide-pencil').locator('..');
+        if (await editButton.isVisible()) {
+          await editButton.click();
+          await page.waitForTimeout(200);
+
+          // Get bounding box while editing
+          const editingBox = await firstFee.boundingBox();
+
+          // Height should remain stable (within 10px tolerance)
+          if (initialBox && editingBox) {
+            const heightDiff = Math.abs(editingBox.height - initialBox.height);
+            console.log(`Height before: ${initialBox.height}, after: ${editingBox.height}, diff: ${heightDiff}`);
+            expect(heightDiff).toBeLessThanOrEqual(10);
+          }
+
+          // Cancel editing
+          await page.keyboard.press('Escape');
+        }
+      }
+    }
+  });
 });

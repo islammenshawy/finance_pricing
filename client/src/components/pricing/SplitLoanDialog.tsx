@@ -206,7 +206,7 @@ export function SplitLoanDialog({ loan, isOpen, onClose, onSuccess }: SplitLoanD
 
                     return (
                       <label
-                        key={invoice.id}
+                        key={`${split.id}-${invoice.id}`}
                         className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
                           isAssigned
                             ? 'bg-primary/10'

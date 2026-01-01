@@ -521,3 +521,123 @@ export interface CalculatePricingResponse {
  *
  * 5. Total Invoice Amount = sum(invoice.amount) with FX conversion
  */
+
+// ============================================
+// SNAPSHOT (Playback Feature)
+// ============================================
+
+export interface SnapshotCurrencySummary {
+  loanCount: number;
+  totalAmount: number;
+  totalFees: number;
+  totalInterest: number;
+  netProceeds: number;
+  avgRate: number;            // Average effective rate
+}
+
+export interface SnapshotCurrencyDelta {
+  feesChange: number;
+  interestChange: number;
+  netProceedsChange: number;
+  avgRateChange: number;      // In basis points
+}
+
+// ============================================
+// DETAILED CHANGE TRACKING
+// ============================================
+
+export type ChangeAction = 'added' | 'deleted' | 'modified' | 'moved';
+
+export interface FeeChangeDetail {
+  action: ChangeAction;
+  loanId: string;
+  loanNumber: string;
+  feeId: string;
+  feeName: string;
+  feeCode: string;
+  currency: string;
+  oldAmount?: number;
+  newAmount?: number;
+}
+
+export interface RateChangeDetail {
+  action: 'modified';
+  loanId: string;
+  loanNumber: string;
+  currency: string;
+  field: 'baseRate' | 'spread';
+  oldValue: number;
+  newValue: number;
+  oldEffectiveRate: number;
+  newEffectiveRate: number;
+}
+
+export interface InvoiceChangeDetail {
+  action: ChangeAction;
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+  // For moves
+  sourceLoanId?: string;
+  sourceLoanNumber?: string;
+  targetLoanId?: string;
+  targetLoanNumber?: string;
+  // For add/delete
+  loanId?: string;
+  loanNumber?: string;
+}
+
+export interface StatusChangeDetail {
+  action: 'modified';
+  loanId: string;
+  loanNumber: string;
+  field: 'status' | 'pricingStatus';
+  oldValue: string;
+  newValue: string;
+}
+
+export interface SnapshotChanges {
+  fees: FeeChangeDetail[];
+  rates: RateChangeDetail[];
+  invoices: InvoiceChangeDetail[];
+  statuses: StatusChangeDetail[];
+}
+
+/**
+ * Snapshot summary for timeline display (without loan data)
+ */
+export interface SnapshotSummary {
+  id: string;
+  customerId: string;
+  timestamp: Date;
+  userId: string;
+  userName: string;
+  summary: Record<string, SnapshotCurrencySummary>;
+  delta: Record<string, SnapshotCurrencyDelta> | null;
+  changes: SnapshotChanges;           // Detailed change tracking
+  changeCount: number;
+  description?: string;
+}
+
+/**
+ * Full snapshot with decompressed loans (for playback mode)
+ */
+export interface Snapshot extends SnapshotSummary {
+  loans: Loan[];
+}
+
+export interface CreateSnapshotRequest {
+  customerId: string;
+  loans: Loan[];
+  changes?: SnapshotChanges;
+  changeCount?: number;
+  description?: string;
+}
+
+export interface SnapshotListResponse {
+  snapshots: SnapshotSummary[];
+  total: number;
+  limit: number;
+  skip: number;
+}

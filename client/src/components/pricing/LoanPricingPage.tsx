@@ -1,5 +1,10 @@
-import { useState, useCallback } from 'react';
-import type { Fee, LoanStatus, PricingStatus } from '@loan-pricing/shared';
+import { useState, useCallback, useMemo, useEffect } from 'react';
+import type {
+  Fee,
+  LoanStatus,
+  PricingStatus,
+  SnapshotChanges,
+} from '@loan-pricing/shared';
 import {
   updateLoan,
   addFeeToLoan,
@@ -7,19 +12,25 @@ import {
   removeFee,
   getFeeConfigs,
   getCustomerWithLoans,
+  createSnapshot,
 } from '@/lib/api';
-import { useQuery } from '@tanstack/react-query';
-import { useChangeStore } from '@/stores/changeStore';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useChangeStore, type FeeChange } from '@/stores/changeStore';
 import { useLiveCalculation } from '@/hooks/useLiveCalculation';
 import { useFilteredLoans } from '@/hooks/useFilteredLoans';
+import { usePlayback } from '@/hooks/usePlayback';
 import { useToast } from '@/components/ui/toast';
 import { LoanPricingTable } from './LoanPricingTable';
 import { LoanPricingCards } from './LoanPricingCards';
 import { ImpactSummaryPanel } from './ImpactSummaryPanel';
+import { SnapshotChangesPanel } from './SnapshotChangesPanel';
 import { BulkActionBar } from './BulkActionBar';
 import { AuditPanel } from './AuditPanel';
 import { ChangesOverviewPanel } from './ChangesOverviewPanel';
 import { MaturityOverview } from './MaturityOverview';
+import { PlaybackTimeline } from './PlaybackTimeline';
+import { PlaybackOverlay } from './PlaybackOverlay';
+import { SaveChangesDialog } from './SaveChangesDialog';
 import { FilterToolbar } from './FilterToolbar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -49,9 +60,12 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [selectedLoanIds, setSelectedLoanIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [auditPanelOpen, setAuditPanelOpen] = useState(false);
   const [showOnlyModified, setShowOnlyModified] = useState(false);
   // maturityFilter now synced with filters.maturityBucket from useFilteredLoans
+
+  const queryClient = useQueryClient();
 
   const {
     trackChange,
@@ -68,6 +82,223 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
   } = useChangeStore();
 
   const { success: toastSuccess, error: toastError } = useToast();
+
+  // Playback mode state
+  const {
+    isPlaybackMode,
+    snapshotLoans,
+    previousSnapshotLoans,
+    snapshotSummary,
+    currentSnapshotIndex,
+    allSnapshots,
+    hasPrevious,
+    hasNext,
+    exitPlayback,
+    goToPrevious,
+    goToNext,
+  } = usePlayback();
+
+  // Playback filter state - default to showing only changes
+  const [showPlaybackChangedOnly, setShowPlaybackChangedOnly] = useState(true);
+
+  // Enable "show only changes" filter when entering playback mode
+  useEffect(() => {
+    if (isPlaybackMode) {
+      setShowPlaybackChangedOnly(true);
+    }
+  }, [isPlaybackMode]);
+
+  // Compute playback previews by comparing current vs previous snapshot
+  const playbackPreviews = useMemo(() => {
+    if (!isPlaybackMode || !snapshotLoans || !previousSnapshotLoans) {
+      return new Map();
+    }
+
+    const previews = new Map<string, {
+      effectiveRate: number;
+      originalEffectiveRate: number;
+      baseRate: number;
+      originalBaseRate: number;
+      spread: number;
+      originalSpread: number;
+      interestAmount: number;
+      originalInterestAmount: number;
+      totalFees: number;
+      originalTotalFees: number;
+      netProceeds: number;
+      originalNetProceeds: number;
+    }>();
+
+    // Create lookup map for previous loans
+    const previousLoansMap = new Map(previousSnapshotLoans.map(loan => [loan.id, loan]));
+
+    // Compare each loan in current snapshot with previous
+    for (const loan of snapshotLoans) {
+      const prevLoan = previousLoansMap.get(loan.id);
+
+      if (prevLoan) {
+        // Check if anything changed
+        const baseRateChanged = loan.pricing.baseRate !== prevLoan.pricing.baseRate;
+        const spreadChanged = loan.pricing.spread !== prevLoan.pricing.spread;
+        const rateChanged = loan.pricing.effectiveRate !== prevLoan.pricing.effectiveRate;
+        const feesChanged = loan.totalFees !== prevLoan.totalFees;
+        const interestChanged = loan.interestAmount !== prevLoan.interestAmount;
+        const netChanged = loan.netProceeds !== prevLoan.netProceeds;
+
+        if (baseRateChanged || spreadChanged || rateChanged || feesChanged || interestChanged || netChanged) {
+          previews.set(loan.id, {
+            effectiveRate: loan.pricing.effectiveRate,
+            originalEffectiveRate: prevLoan.pricing.effectiveRate,
+            baseRate: loan.pricing.baseRate,
+            originalBaseRate: prevLoan.pricing.baseRate,
+            spread: loan.pricing.spread,
+            originalSpread: prevLoan.pricing.spread,
+            interestAmount: loan.interestAmount,
+            originalInterestAmount: prevLoan.interestAmount,
+            totalFees: loan.totalFees,
+            originalTotalFees: prevLoan.totalFees,
+            netProceeds: loan.netProceeds,
+            originalNetProceeds: prevLoan.netProceeds,
+          });
+        }
+      }
+    }
+
+    return previews;
+  }, [isPlaybackMode, snapshotLoans, previousSnapshotLoans]);
+
+  // Playback-specific fee change detection (compares current vs previous snapshot)
+  const playbackFeeChanges = useMemo(() => {
+    if (!isPlaybackMode || !snapshotLoans || !previousSnapshotLoans) {
+      return {
+        addedFees: new Map<string, Set<string>>(), // loanId -> Set of feeIds that were added
+        deletedFees: new Map<string, Set<string>>(), // loanId -> Set of feeIds that were deleted
+        modifiedFees: new Map<string, Map<string, { oldAmount: number; newAmount: number }>>(), // loanId -> feeId -> amounts
+      };
+    }
+
+    const previousLoansMap = new Map(previousSnapshotLoans.map(loan => [loan.id, loan]));
+    const addedFees = new Map<string, Set<string>>();
+    const deletedFees = new Map<string, Set<string>>();
+    const modifiedFees = new Map<string, Map<string, { oldAmount: number; newAmount: number }>>();
+
+    for (const loan of snapshotLoans) {
+      const prevLoan = previousLoansMap.get(loan.id);
+      if (!prevLoan) continue;
+
+      const currentFeeIds = new Set(loan.fees.map(f => f.id));
+      const prevFeeIds = new Set(prevLoan.fees.map(f => f.id));
+      const prevFeeMap = new Map(prevLoan.fees.map(f => [f.id, f]));
+      const currentFeeMap = new Map(loan.fees.map(f => [f.id, f]));
+
+      // Find added fees (in current but not in previous)
+      const added = new Set<string>();
+      for (const feeId of currentFeeIds) {
+        if (!prevFeeIds.has(feeId)) {
+          added.add(feeId);
+        }
+      }
+      if (added.size > 0) addedFees.set(loan.id, added);
+
+      // Find deleted fees (in previous but not in current)
+      const deleted = new Set<string>();
+      for (const feeId of prevFeeIds) {
+        if (!currentFeeIds.has(feeId)) {
+          deleted.add(feeId);
+        }
+      }
+      if (deleted.size > 0) deletedFees.set(loan.id, deleted);
+
+      // Find modified fees (in both but different amount)
+      const modified = new Map<string, { oldAmount: number; newAmount: number }>();
+      for (const feeId of currentFeeIds) {
+        if (prevFeeIds.has(feeId)) {
+          const currentFee = currentFeeMap.get(feeId)!;
+          const prevFee = prevFeeMap.get(feeId)!;
+          if (currentFee.calculatedAmount !== prevFee.calculatedAmount) {
+            modified.set(feeId, {
+              oldAmount: prevFee.calculatedAmount,
+              newAmount: currentFee.calculatedAmount,
+            });
+          }
+        }
+      }
+      if (modified.size > 0) modifiedFees.set(loan.id, modified);
+    }
+
+    return { addedFees, deletedFees, modifiedFees };
+  }, [isPlaybackMode, snapshotLoans, previousSnapshotLoans]);
+
+  // Playback fee change helper functions
+  const playbackGetPendingFeeAdds = useCallback((loanId: string): FeeChange[] => {
+    const added = playbackFeeChanges.addedFees.get(loanId);
+    if (!added) return [];
+
+    const loan = snapshotLoans?.find(l => l.id === loanId);
+    if (!loan) return [];
+
+    return Array.from(added).map(feeId => {
+      const fee = loan.fees.find(f => f.id === feeId);
+      return {
+        id: `playback-add-${feeId}`,
+        loanId,
+        type: 'add' as const,
+        feeId,
+        feeConfigId: fee?.feeConfigId,
+        feeName: fee?.name || 'Unknown Fee',
+        timestamp: new Date().toISOString(),
+      };
+    });
+  }, [playbackFeeChanges.addedFees, snapshotLoans]);
+
+  const playbackIsFeeDeleted = useCallback((_loanId: string, _feeId: string): boolean => {
+    // In playback, we show fees from current snapshot, so deleted fees won't appear
+    // Deleted fees from previous snapshot aren't shown in current
+    return false;
+  }, []);
+
+  const playbackGetFeeUpdates = useCallback((loanId: string, feeId: string): Partial<Fee> | undefined => {
+    const modified = playbackFeeChanges.modifiedFees.get(loanId);
+    if (!modified) return undefined;
+
+    const change = modified.get(feeId);
+    if (!change) return undefined;
+
+    // Return the new amount as an "update" to trigger the amber highlighting
+    return { calculatedAmount: change.newAmount };
+  }, [playbackFeeChanges.modifiedFees]);
+
+  const playbackIsNewFee = useCallback((loanId: string, feeId: string): boolean => {
+    const added = playbackFeeChanges.addedFees.get(loanId);
+    return added?.has(feeId) ?? false;
+  }, [playbackFeeChanges.addedFees]);
+
+  // Get loan IDs with recorded changes (the source of truth for what changed)
+  const recordedChangeLoanIds = useMemo(() => {
+    const changedLoanIds = new Set<string>();
+    const changes = snapshotSummary?.changes;
+    if (changes) {
+      changes.fees?.forEach(f => changedLoanIds.add(f.loanId));
+      changes.rates?.forEach(r => changedLoanIds.add(r.loanId));
+      changes.invoices?.forEach(i => {
+        if (i.loanId) changedLoanIds.add(i.loanId);
+        if (i.sourceLoanId) changedLoanIds.add(i.sourceLoanId);
+        if (i.targetLoanId) changedLoanIds.add(i.targetLoanId);
+      });
+      changes.statuses?.forEach(s => changedLoanIds.add(s.loanId));
+    }
+    return changedLoanIds;
+  }, [snapshotSummary?.changes]);
+
+  // Filter playback loans to show only changed ones if filter is enabled
+  const playbackFilteredLoans = useMemo(() => {
+    if (!isPlaybackMode || !snapshotLoans) return [];
+    if (!showPlaybackChangedOnly) return snapshotLoans;
+
+    // Use ONLY recorded changes as the source of truth - not calculated deltas
+    // Calculated deltas can include floating-point differences or computed field changes
+    return snapshotLoans.filter(loan => recordedChangeLoanIds.has(loan.id));
+  }, [isPlaybackMode, snapshotLoans, showPlaybackChangedOnly, recordedChangeLoanIds]);
 
   // Fetch customer with loans
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -343,9 +574,105 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
     [selectedLoans, refetch]
   );
 
+  // Open save dialog
+  const handleOpenSaveDialog = useCallback(() => {
+    setSaveDialogOpen(true);
+  }, []);
+
+  // Build detailed snapshot changes from current change state
+  const buildSnapshotChanges = useCallback((): SnapshotChanges => {
+    const snapshotChanges: SnapshotChanges = {
+      fees: [],
+      rates: [],
+      invoices: [],
+      statuses: [],
+    };
+
+    // Build fee change details
+    for (const feeChange of feeChanges) {
+      const loan = loans.find((l) => l.id === feeChange.loanId);
+      if (!loan) continue;
+
+      if (feeChange.type === 'add') {
+        snapshotChanges.fees.push({
+          action: 'added',
+          loanId: feeChange.loanId,
+          loanNumber: loan.loanNumber,
+          feeId: feeChange.feeConfigId || '',
+          feeName: feeChange.feeName,
+          feeCode: feeChange.feeConfigId || '',
+          currency: loan.currency,
+          newAmount: 0, // Will be calculated by server
+        });
+      } else if (feeChange.type === 'delete' && feeChange.originalFee) {
+        snapshotChanges.fees.push({
+          action: 'deleted',
+          loanId: feeChange.loanId,
+          loanNumber: loan.loanNumber,
+          feeId: feeChange.feeId || '',
+          feeName: feeChange.feeName,
+          feeCode: feeChange.originalFee.code,
+          currency: loan.currency,
+          oldAmount: feeChange.originalFee.calculatedAmount,
+        });
+      } else if (feeChange.type === 'update' && feeChange.originalFee && feeChange.updates) {
+        snapshotChanges.fees.push({
+          action: 'modified',
+          loanId: feeChange.loanId,
+          loanNumber: loan.loanNumber,
+          feeId: feeChange.feeId || '',
+          feeName: feeChange.feeName,
+          feeCode: feeChange.originalFee.code,
+          currency: loan.currency,
+          oldAmount: feeChange.originalFee.calculatedAmount,
+          newAmount: feeChange.updates.calculatedAmount ?? feeChange.originalFee.calculatedAmount,
+        });
+      }
+    }
+
+    // Build rate change details
+    for (const change of changes) {
+      const loan = loans.find((l) => l.id === change.loanId);
+      if (!loan) continue;
+
+      // Only process pricing field changes
+      if (change.fieldPath === 'pricing.baseRate' || change.fieldPath === 'pricing.spread') {
+        const field = change.fieldPath === 'pricing.baseRate' ? 'baseRate' : 'spread';
+        const oldValue = change.originalValue as number;
+        const newValue = change.newValue as number;
+
+        // Calculate effective rates
+        const otherField = field === 'baseRate' ? 'spread' : 'baseRate';
+        const otherValue = loan.pricing[otherField];
+        const oldEffectiveRate = field === 'baseRate' ? oldValue + otherValue : otherValue + oldValue;
+        const newEffectiveRate = field === 'baseRate' ? newValue + otherValue : otherValue + newValue;
+
+        snapshotChanges.rates.push({
+          action: 'modified',
+          loanId: change.loanId,
+          loanNumber: loan.loanNumber,
+          currency: loan.currency,
+          field,
+          oldValue,
+          newValue,
+          oldEffectiveRate,
+          newEffectiveRate,
+        });
+      }
+    }
+
+    return snapshotChanges;
+  }, [changes, feeChanges, loans]);
+
   // Save all changes (rates and fees)
-  const handleSaveAll = useCallback(async () => {
+  const handleSaveAll = useCallback(async (description?: string) => {
+    setSaveDialogOpen(false);
     setSaving(true);
+    const changeCount = changes.length + feeChanges.length;
+
+    // Build snapshot changes before making any API calls
+    const snapshotChanges = buildSnapshotChanges();
+
     try {
       // Group rate changes by loan
       const changesByLoan = new Map<string, typeof changes>();
@@ -381,17 +708,37 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
         }
       }
 
+      // Refetch to get updated loan data
+      const { data: updatedData } = await refetch();
+
+      // Create snapshot with updated loan data and detailed changes
+      if (updatedData?.loans && changeCount > 0) {
+        try {
+          await createSnapshot({
+            customerId,
+            loans: updatedData.loans,
+            changes: snapshotChanges,
+            changeCount,
+            description,
+          });
+          // Refresh timeline
+          queryClient.invalidateQueries({ queryKey: ['snapshots', customerId] });
+        } catch (snapshotError) {
+          console.error('Failed to create snapshot:', snapshotError);
+          // Don't fail the save if snapshot fails
+        }
+      }
+
       clearAllChanges();
       clearAllPreviews();
-      refetch();
-      toastSuccess(`Successfully saved ${changes.length + feeChanges.length} changes`);
+      toastSuccess(`Successfully saved ${changeCount} changes`);
     } catch (error) {
       console.error('Failed to save changes:', error);
       toastError('Failed to save changes. Please try again.');
     } finally {
       setSaving(false);
     }
-  }, [changes, feeChanges, clearAllChanges, clearAllPreviews, refetch, toastSuccess, toastError]);
+  }, [changes, feeChanges, clearAllChanges, clearAllPreviews, refetch, toastSuccess, toastError, customerId, queryClient, buildSnapshotChanges]);
 
   // Revert all changes
   const handleRevertAll = useCallback(() => {
@@ -416,9 +763,9 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className={`h-full flex flex-col transition-all duration-300 ${isPlaybackMode ? 'playback-mode playback-vignette' : ''}`}>
       {/* Header */}
-      <header className="border-b bg-card px-4 py-3">
+      <header className={`border-b bg-card px-4 py-3 transition-colors ${isPlaybackMode ? 'bg-slate-100 dark:bg-slate-900' : ''}`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="sm" onClick={onBack}>
@@ -453,8 +800,39 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
         </div>
       </header>
 
-      {/* Modern Filter Toolbar */}
-      <div className="border-b bg-muted/30 px-4 py-3">
+      {/* Playback Overlay - shows when viewing a snapshot */}
+      {isPlaybackMode && snapshotSummary && (
+        <PlaybackOverlay
+          snapshot={snapshotSummary}
+          snapshotIndex={currentSnapshotIndex}
+          totalSnapshots={allSnapshots.length}
+          onExit={exitPlayback}
+          onPrevious={goToPrevious}
+          onNext={goToNext}
+          hasPrevious={hasPrevious}
+          hasNext={hasNext}
+          showChangedOnly={showPlaybackChangedOnly}
+          onToggleChangedOnly={() => setShowPlaybackChangedOnly(v => !v)}
+          changedCount={recordedChangeLoanIds.size}
+        />
+      )}
+
+      {/* Maturity Overview - collapsible timeline */}
+      <div className={isPlaybackMode ? 'playback-muted playback-panel-overlay' : ''}>
+        <MaturityOverview
+          loans={isPlaybackMode && snapshotLoans ? snapshotLoans : loans}
+          selectedBucket={filters.maturityBucket}
+          onFilterByMaturity={(bucket) => setFilter('maturityBucket', bucket)}
+        />
+      </div>
+
+      {/* Playback Timeline - shows pricing history snapshots */}
+      <div className={isPlaybackMode ? 'playback-muted playback-panel-overlay' : ''}>
+        <PlaybackTimeline customerId={customerId} />
+      </div>
+
+      {/* Filter Toolbar - moved below pricing history */}
+      <div className={`border-b bg-muted/30 px-4 py-3 ${isPlaybackMode ? 'playback-muted' : ''}`}>
         <div className="flex items-center gap-4">
           <div className="flex-1">
             <FilterToolbar
@@ -538,78 +916,88 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
         </div>
       </div>
 
-      {/* Maturity Overview - collapsible timeline */}
-      <MaturityOverview
-        loans={loans}
-        selectedBucket={filters.maturityBucket}
-        onFilterByMaturity={(bucket) => setFilter('maturityBucket', bucket)}
-      />
-
       {/* Changes Overview Panel - integrated view with visual bars */}
-      <ChangesOverviewPanel
-        loans={loans}
-        previews={previews}
-        onSave={handleSaveAll}
-        onRevert={handleRevertAll}
-        saving={saving}
-      />
+      {!isPlaybackMode && (
+        <ChangesOverviewPanel
+          loans={loans}
+          previews={previews}
+          onSave={handleOpenSaveDialog}
+          onRevert={handleRevertAll}
+          saving={saving}
+        />
+      )}
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className={`flex-1 flex overflow-hidden relative ${isPlaybackMode ? 'playback-grain' : ''}`}>
         {/* Table or Cards View */}
         <div className="flex-1 overflow-hidden">
           {viewMode === 'table' ? (
             <LoanPricingTable
-              loans={sortedLoans}
-              allLoans={loans}
+              loans={isPlaybackMode ? playbackFilteredLoans : sortedLoans}
+              allLoans={isPlaybackMode && snapshotLoans ? snapshotLoans : loans}
               groupBy={groupBy}
               feeConfigs={feeConfigs}
-              onPreviewChange={handlePreviewChange}
-              onAddFee={handleAddFee}
-              onUpdateFee={handleUpdateFee}
-              onRemoveFee={handleRemoveFee}
-              onSplitSuccess={() => refetch()}
-              onInvoiceChange={() => refetch()}
-              previews={previews}
-              getPendingFeeAdds={getPendingFeeAdds}
-              isFeeDeleted={isFeeDeleted}
-              getFeeUpdates={getFeeUpdates}
+              onPreviewChange={isPlaybackMode ? () => {} : handlePreviewChange}
+              onAddFee={isPlaybackMode ? () => {} : handleAddFee}
+              onUpdateFee={isPlaybackMode ? () => {} : handleUpdateFee}
+              onRemoveFee={isPlaybackMode ? () => {} : handleRemoveFee}
+              onSplitSuccess={isPlaybackMode ? () => {} : () => refetch()}
+              onInvoiceChange={isPlaybackMode ? () => {} : () => refetch()}
+              previews={isPlaybackMode ? playbackPreviews : previews}
+              getPendingFeeAdds={isPlaybackMode ? playbackGetPendingFeeAdds : getPendingFeeAdds}
+              isFeeDeleted={isPlaybackMode ? playbackIsFeeDeleted : isFeeDeleted}
+              getFeeUpdates={isPlaybackMode ? playbackGetFeeUpdates : getFeeUpdates}
+              isNewFee={isPlaybackMode ? playbackIsNewFee : undefined}
               sortField={sortField}
               sortDirection={sortDirection}
               onSort={handleSort}
-              onStatusChange={handleStatusChange}
-              selectedIds={selectedLoanIds}
-              onSelectionChange={setSelectedLoanIds}
+              onStatusChange={isPlaybackMode ? undefined : handleStatusChange}
+              selectedIds={isPlaybackMode ? new Set() : selectedLoanIds}
+              onSelectionChange={isPlaybackMode ? () => {} : setSelectedLoanIds}
+              readOnly={isPlaybackMode}
             />
           ) : (
             <LoanPricingCards
-              loans={sortedLoans}
+              loans={isPlaybackMode ? playbackFilteredLoans : sortedLoans}
               feeConfigs={feeConfigs}
-              onPreviewChange={handlePreviewChange}
-              onAddFee={handleAddFee}
-              onUpdateFee={handleUpdateFee}
-              onRemoveFee={handleRemoveFee}
-              onSplitSuccess={() => refetch()}
-              previews={previews}
-              getPendingFeeAdds={getPendingFeeAdds}
-              isFeeDeleted={isFeeDeleted}
-              getFeeUpdates={getFeeUpdates}
+              onPreviewChange={isPlaybackMode ? () => {} : handlePreviewChange}
+              onAddFee={isPlaybackMode ? () => {} : handleAddFee}
+              onUpdateFee={isPlaybackMode ? () => {} : handleUpdateFee}
+              onRemoveFee={isPlaybackMode ? () => {} : handleRemoveFee}
+              onSplitSuccess={isPlaybackMode ? () => {} : () => refetch()}
+              previews={isPlaybackMode ? playbackPreviews : previews}
+              getPendingFeeAdds={isPlaybackMode ? playbackGetPendingFeeAdds : getPendingFeeAdds}
+              isFeeDeleted={isPlaybackMode ? playbackIsFeeDeleted : isFeeDeleted}
+              getFeeUpdates={isPlaybackMode ? playbackGetFeeUpdates : getFeeUpdates}
             />
           )}
         </div>
 
-        {/* Impact Summary Panel */}
-        <ImpactSummaryPanel
-          loans={loans}
-          previews={previews}
-          onSave={handleSaveAll}
-          onRevert={handleRevertAll}
-          saving={saving}
-        />
+        {/* Impact Summary Panel - swap for Snapshot panel in playback mode */}
+        {isPlaybackMode && snapshotSummary ? (
+          <SnapshotChangesPanel
+            timestamp={snapshotSummary.timestamp}
+            userName={snapshotSummary.userName}
+            changeCount={snapshotSummary.changeCount}
+            description={snapshotSummary.description}
+            summary={snapshotSummary.summary}
+            delta={snapshotSummary.delta}
+            changes={snapshotSummary.changes || { fees: [], rates: [], invoices: [], statuses: [] }}
+            onExit={exitPlayback}
+          />
+        ) : (
+          <ImpactSummaryPanel
+            loans={loans}
+            previews={previews}
+            onSave={handleOpenSaveDialog}
+            onRevert={handleRevertAll}
+            saving={saving}
+          />
+        )}
       </div>
 
-      {/* Bulk Action Bar */}
-      {selectedLoans.length > 0 && (
+      {/* Bulk Action Bar - hidden in playback mode */}
+      {!isPlaybackMode && selectedLoans.length > 0 && (
         <BulkActionBar
           selectedLoans={selectedLoans}
           feeConfigs={feeConfigs}
@@ -629,6 +1017,14 @@ export function LoanPricingPage({ customerId, onBack }: LoanPricingPageProps) {
         onClose={() => setAuditPanelOpen(false)}
       />
 
+      {/* Save Changes Dialog */}
+      <SaveChangesDialog
+        isOpen={saveDialogOpen}
+        changeCount={changes.length + feeChanges.length}
+        saving={saving}
+        onClose={() => setSaveDialogOpen(false)}
+        onSave={handleSaveAll}
+      />
     </div>
   );
 }

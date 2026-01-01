@@ -28,8 +28,8 @@ export function SortableHeader({
   return (
     <div className={`px-3 flex ${alignClass}`}>
       <button
-        className={`inline-flex items-center gap-1 text-xs uppercase tracking-wide font-medium transition-colors hover:text-foreground ${
-          isActive ? 'text-foreground' : 'text-muted-foreground'
+        className={`inline-flex items-center gap-1 text-[11px] uppercase tracking-wider font-semibold transition-colors hover:text-slate-900 dark:hover:text-slate-100 ${
+          isActive ? 'text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-300'
         }`}
         onClick={() => onSort?.(field)}
       >
@@ -41,7 +41,7 @@ export function SortableHeader({
             <ArrowDown className="h-3 w-3" />
           )
         ) : (
-          <ArrowUpDown className="h-3 w-3 opacity-30" />
+          <ArrowUpDown className="h-3 w-3 opacity-40" />
         )}
       </button>
     </div>

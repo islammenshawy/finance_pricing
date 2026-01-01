@@ -51,6 +51,7 @@ function UsersPage() {
 14. [Reusable Cell Renderers](#reusable-cell-renderers)
 15. [Common Patterns & Recipes](#common-patterns--recipes)
 16. [Keyboard Navigation](#keyboard-navigation)
+17. [Collapsible Data Sections](#collapsible-data-sections)
 
 ---
 
@@ -1478,6 +1479,160 @@ The grid automatically adds ARIA attributes for screen readers:
 - `aria-selected` for selected rows
 - `aria-expanded` for expandable rows
 - `tabindex` for keyboard focus
+
+---
+
+## Collapsible Data Sections
+
+For nested data like invoices or line items within an expanded row, use `CollapsibleDataSection`.
+It provides controlled height with scrolling, built-in search, and is collapsed by default.
+
+### Basic Usage
+
+```tsx
+import { CollapsibleDataSection } from '@/components/grid';
+
+<CollapsibleDataSection
+  title="Invoices"
+  data={loan.invoices}
+  getItemId={(inv) => inv.id}
+  maxHeight={250}
+  search={{ fields: ['invoiceNumber', 'debtorName'] }}
+  renderItem={(invoice) => (
+    <div className="px-3 py-2 border-b flex justify-between">
+      <span>{invoice.invoiceNumber}</span>
+      <span>{formatCurrency(invoice.amount)}</span>
+    </div>
+  )}
+/>
+```
+
+### With Table Header and Actions
+
+```tsx
+<CollapsibleDataSection
+  title="Invoices"
+  data={invoices}
+  getItemId={(inv) => inv.id}
+  defaultExpanded={false}
+  maxHeight={300}
+
+  // Search configuration (uses same pattern as grid toolbar)
+  search={{
+    enabled: true,
+    fields: ['invoiceNumber', 'debtorName', 'description'],
+    placeholder: 'Search invoices...',
+    debounceMs: 200,
+  }}
+
+  // Header extras
+  headerExtra={<Badge>{formatCurrency(totalAmount)}</Badge>}
+  headerActions={
+    <Button size="sm" onClick={handleAddInvoice}>
+      <Plus className="h-3 w-3 mr-1" />
+      Add
+    </Button>
+  }
+
+  // Table header row
+  renderHeader={() => (
+    <div className="grid grid-cols-5 gap-2 px-3 py-2 text-xs font-medium text-muted-foreground">
+      <span>Invoice #</span>
+      <span>Debtor</span>
+      <span className="text-right">Amount</span>
+      <span className="text-center">Due Date</span>
+      <span className="text-right">Actions</span>
+    </div>
+  )}
+
+  // Render each row
+  renderItem={(invoice, index, { isHighlighted, searchQuery }) => (
+    <div className="grid grid-cols-5 gap-2 px-3 py-2 border-b hover:bg-muted/20">
+      <span className="font-medium">{invoice.invoiceNumber}</span>
+      <span>{invoice.debtorName}</span>
+      <span className="text-right font-mono">{formatCurrency(invoice.amount)}</span>
+      <span className="text-center">{formatDate(invoice.dueDate)}</span>
+      <div className="text-right">
+        <Button size="sm" variant="ghost" onClick={() => editInvoice(invoice)}>
+          <Pencil className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  )}
+
+  emptyMessage="No invoices"
+  emptySearchMessage="No matching invoices"
+/>
+```
+
+### Props Reference
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `title` | `string` | required | Section header title |
+| `data` | `T[]` | required | Data array |
+| `getItemId` | `(item: T) => string` | required | Unique ID extractor |
+| `renderItem` | `(item, index, context) => ReactNode` | required | Item renderer |
+| `search` | `boolean \| SectionSearchConfig` | `false` | Enable search |
+| `defaultExpanded` | `boolean` | `false` | Initial expanded state |
+| `expanded` | `boolean` | - | Controlled expanded state |
+| `maxHeight` | `number` | `300` | Max height before scroll (px) |
+| `showCount` | `boolean` | `true` | Show item count badge |
+| `headerExtra` | `ReactNode` | - | Extra header content |
+| `headerActions` | `ReactNode` | - | Action buttons in header |
+| `renderHeader` | `() => ReactNode` | - | Column header renderer |
+| `bordered` | `boolean` | `true` | Show border |
+
+### Search Configuration
+
+```tsx
+search={{
+  enabled: true,                    // Enable search
+  fields: ['name', 'code'],         // Fields to search (dot notation supported)
+  filterFn: (item, query) => ...,   // Custom filter function
+  placeholder: 'Search...',         // Input placeholder
+  debounceMs: 200,                  // Debounce delay
+  highlightMatches: true,           // Highlight matching text
+  shortcutKey: 'f',                 // Ctrl/Cmd + key to focus
+}}
+```
+
+### Using in Expanded Row Content
+
+```tsx
+<DataGrid
+  data={loans}
+  columns={columns}
+  getRowId={(loan) => loan.id}
+  expansion={{
+    enabled: true,
+    expandedContent: (loan) => (
+      <div className="p-4 space-y-4">
+        {/* Invoices Section */}
+        <CollapsibleDataSection
+          title="Invoices"
+          data={loan.invoices}
+          getItemId={(inv) => inv.id}
+          search={{ fields: ['invoiceNumber', 'debtorName'] }}
+          maxHeight={200}
+          headerExtra={<Badge>{loan.invoices.length}</Badge>}
+          renderItem={(inv) => <InvoiceRow invoice={inv} />}
+        />
+
+        {/* Fees Section */}
+        <CollapsibleDataSection
+          title="Fees"
+          data={loan.fees}
+          getItemId={(fee) => fee.id}
+          search={{ fields: ['name', 'code'] }}
+          maxHeight={150}
+          renderItem={(fee) => <FeeRow fee={fee} />}
+        />
+      </div>
+    ),
+  }}
+/>
+```
 
 ---
 

@@ -7,6 +7,7 @@ interface EditableRateCellProps {
   isModified: boolean;
   originalValue: number | undefined;
   isLocked: boolean;
+  readOnly?: boolean;
   onChange: (value: number) => void;
 }
 
@@ -19,6 +20,7 @@ export function EditableRateCell({
   isModified,
   originalValue,
   isLocked,
+  readOnly = false,
   onChange,
 }: EditableRateCellProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -45,8 +47,22 @@ export function EditableRateCell({
   const delta = isModified && originalValue !== undefined ? value - originalValue : 0;
   const deltaPercent = delta * 100;
 
-  if (isLocked) {
-    return <span className="font-mono text-muted-foreground">{formatPercent(value)}</span>;
+  if (isLocked || readOnly) {
+    return (
+      <div className="inline-flex flex-col items-end">
+        <span className={`font-mono ${isModified ? 'text-amber-600 font-semibold' : 'text-muted-foreground'}`}>
+          {formatPercent(value)}
+        </span>
+        {isModified && originalValue !== undefined && (
+          <div className="flex items-center gap-1 text-xs mt-0.5">
+            <span className="text-muted-foreground line-through">{formatPercent(originalValue)}</span>
+            <span className={deltaPercent > 0 ? 'text-green-600' : 'text-red-600'}>
+              {deltaPercent > 0 ? '+' : ''}{deltaPercent.toFixed(2)}%
+            </span>
+          </div>
+        )}
+      </div>
+    );
   }
 
   if (isEditing) {

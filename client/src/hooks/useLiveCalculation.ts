@@ -1,22 +1,88 @@
+/**
+ * @fileoverview Live Calculation Hook - Real-time Pricing Preview
+ *
+ * This hook manages real-time calculation previews as users edit loan pricing.
+ * It provides immediate feedback without saving to the database.
+ *
+ * ARCHITECTURE:
+ * ```
+ * User edits rate → trackChange() → calculatePreview() → API call → Update preview state
+ *                                          ↓
+ *                                    [150ms debounce]
+ * ```
+ *
+ * KEY FEATURES:
+ * - Debounced API calls (default 150ms) to avoid overwhelming the server
+ * - Merges pricing changes with fee changes for accurate previews
+ * - Supports batch operations for bulk editing
+ * - Automatic cleanup of pending requests on unmount
+ *
+ * USAGE:
+ * @example
+ * const { previews, calculatePreview, recalculateForFeeChanges } = useLiveCalculation({ loans });
+ *
+ * // When user edits a rate:
+ * calculatePreview(loanId, { baseRate: 0.06 });
+ *
+ * // When user modifies fees:
+ * recalculateForFeeChanges(loanId);
+ *
+ * // Access preview for a loan:
+ * const preview = previews.get(loanId);
+ *
+ * @module hooks/useLiveCalculation
+ * @see api.previewFullLoanState - Backend API for preview calculations
+ * @see useChangeStore - State store for tracking pending changes
+ */
+
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { previewFullLoanState, previewPricing, type FeeChangesPreview } from '@/lib/api';
 import type { LoanPricing, Loan } from '@loan-pricing/shared';
 import { useChangeStore } from '@/stores/changeStore';
 
+// ============================================
+// TYPE DEFINITIONS
+// ============================================
+
+/**
+ * Result of a pricing preview calculation.
+ * Contains both current and original values for comparison.
+ */
 export interface PreviewResult {
+  /** Current effective rate after changes */
   effectiveRate: number;
+  /** Current interest amount after changes */
   interestAmount: number;
+  /** Current total fees after changes */
   totalFees: number;
+  /** Original total fees before changes (for delta display) */
   originalTotalFees?: number;
+  /** Current net proceeds after changes */
   netProceeds: number;
+  /** Original net proceeds before changes (for delta display) */
   originalNetProceeds?: number;
 }
 
+/**
+ * Configuration options for the hook
+ */
 interface UseLiveCalculationOptions {
+  /** Debounce delay in milliseconds (default: 150) */
   debounceMs?: number;
+  /** Array of loans for reference data */
   loans?: Loan[];
 }
 
+// ============================================
+// MAIN HOOK
+// ============================================
+
+/**
+ * Hook for managing live calculation previews.
+ *
+ * @param options - Configuration options
+ * @returns Object with preview state and control methods
+ */
 export function useLiveCalculation(options: UseLiveCalculationOptions = {}) {
   const { debounceMs = 150, loans = [] } = options;
 

@@ -1,3 +1,36 @@
+/**
+ * @fileoverview Loan Service - Core Loan Operations
+ *
+ * This service handles all loan-related business operations including:
+ * - CRUD operations for loans
+ * - Fee management (add, update, remove)
+ * - Invoice management (add, update, remove, move)
+ * - Loan splitting operations
+ * - Preview calculations for UI feedback
+ *
+ * All operations automatically:
+ * - Trigger recalculations via calculationService
+ * - Create audit trails via auditService
+ * - Validate business rules
+ *
+ * @module services/loanService
+ *
+ * @example
+ * // Update a loan's pricing
+ * const loan = await updateLoan(loanId, { pricing: { baseRate: 0.05 } }, userId, userName);
+ *
+ * @example
+ * // Add a fee to a loan
+ * const loan = await addFeeToLoan(loanId, { feeConfigId: 'fee-123' }, userId, userName);
+ *
+ * @example
+ * // Split a loan into child loans
+ * const childLoans = await splitLoan(parentId, { splits: [...] }, userId, userName);
+ *
+ * @see calculationService - For pricing/fee calculations
+ * @see auditService - For audit trail creation
+ */
+
 import { Loan, FeeConfig } from '../models';
 import type { LoanDocument } from '../models';
 import type {
@@ -289,7 +322,7 @@ export async function updateFee(
 
   // Audit changes
   const newFee = fee.toObject();
-  await trackUpdate('fee', feeId, loanId, oldFee as Record<string, unknown>, newFee as Record<string, unknown>, { userId, userName });
+  await trackUpdate('fee', feeId, loanId, oldFee as unknown as Record<string, unknown>, newFee as unknown as Record<string, unknown>, { userId, userName });
 
   return loan;
 }
@@ -564,7 +597,7 @@ export async function updateInvoice(
 
   // Audit changes
   const newValue = invoice.toObject();
-  await trackUpdate('invoice', invoiceId, loanId, oldValue as Record<string, unknown>, newValue as Record<string, unknown>, { userId, userName });
+  await trackUpdate('invoice', invoiceId, loanId, oldValue as unknown as Record<string, unknown>, newValue as unknown as Record<string, unknown>, { userId, userName });
 
   return loan;
 }
