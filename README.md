@@ -106,16 +106,69 @@ This project includes a custom, enterprise-grade DataGrid component that deliver
 | Lazy Module Loading | On-demand features |
 | Feature Presets | Quick configuration |
 
-### What AG-Grid Enterprise Has That We Don't (Yet)
+### Roadmap: Next Features
 
-| Feature | Priority | Notes |
-|---------|:--------:|-------|
-| Server-Side Row Model | Medium | For 100K+ rows |
-| Pivot Tables | Low | Spreadsheet pivoting |
-| Master/Detail | Medium | Nested grids |
-| Tree Data | Medium | Hierarchical display |
-| Aggregation | Medium | Sum/Avg/Count |
-| Clipboard Paste | Medium | Paste from Excel |
+Features planned for future releases with implementation + testing estimates:
+
+#### Phase 1 - Quick Wins (1.5 weeks)
+
+| Feature | Dev | Test | Total | Description |
+|---------|:---:|:----:|:-----:|-------------|
+| Aggregation | 4d | 2d | **6d** | Sum/Avg/Count/Min/Max in grouped rows |
+| Column Groups | 2d | 1d | **3d** | Multi-level column headers |
+| Status Bar | 1d | 0.5d | **1.5d** | Footer with aggregation summaries |
+
+#### Phase 2 - Data Handling (2.5 weeks)
+
+| Feature | Dev | Test | Total | Description |
+|---------|:---:|:----:|:-----:|-------------|
+| Tree Data | 5d | 3d | **8d** | Hierarchical parent-child display |
+| Clipboard Paste | 3d | 2d | **5d** | Paste from Excel/Sheets into grid |
+
+#### Phase 3 - Advanced (3 weeks)
+
+| Feature | Dev | Test | Total | Description |
+|---------|:---:|:----:|:-----:|-------------|
+| Master/Detail | 5d | 3d | **8d** | Nested grids within expandable rows |
+| Server-Side Model | 5d | 4d | **9d** | Backend pagination for 100K+ rows |
+
+#### Phase 4 - Nice to Have
+
+| Feature | Dev | Test | Total | Description |
+|---------|:---:|:----:|:-----:|-------------|
+| Undo/Redo | 3d | 2d | **5d** | Edit history with rollback |
+| Fill Handle | 3d | 2d | **5d** | Drag cell corner to fill values |
+| Row Spanning | 3d | 1.5d | **4.5d** | Cells spanning multiple rows |
+| Side Panels | 2d | 1d | **3d** | Collapsible filter/tool panels |
+
+#### Low Priority (On Request)
+
+| Feature | Complexity | Notes |
+|---------|:----------:|-------|
+| Pivot Tables | Very High | Spreadsheet-style pivoting |
+| Charting Integration | High | Built-in charts from data |
+| Infinite Row Model | High | Endless scroll with lazy fetch |
+| Excel Export with Styles | Medium | Formatted Excel with colors |
+
+### Implementation Timeline
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      FEATURE ROADMAP                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Week 1-2:   ████████░░░░░░░░  Phase 1 (Aggregation, Groups)    │
+│  Week 3-4:   ░░░░░░░░████████  Phase 2 (Tree Data, Clipboard)   │
+│  Week 5-7:   ░░░░░░░░░░░░░░██  Phase 3 (Master/Detail, Server)  │
+│  Week 8+:    ░░░░░░░░░░░░░░░░  Phase 4 (On demand)              │
+│                                                                  │
+│  Current Coverage: 88% ─────────────────────────█████████████░░ │
+│  After Phase 1:    92% ─────────────────────────██████████████░ │
+│  After Phase 2:    95% ─────────────────────────███████████████ │
+│  After Phase 3:    98% ─────────────────────────███████████████ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Feature-to-Size Ratio
 

@@ -478,20 +478,93 @@ For a typical enterprise application:
 | Bundle impact | +27 KB | +1 MB |
 | Load time impact | +50ms | +200ms |
 
-### Missing Features Roadmap
+### Feature Roadmap
 
-Features we could add if needed:
+Planned features with implementation + testing time estimates:
 
-| Feature | Est. Size | Est. Effort | Priority |
-|---------|-----------|-------------|----------|
-| Column Groups | ~1.5 KB | 2 days | On Request |
-| Clipboard Paste | ~2 KB | 3 days | On Request |
-| Tree Data | ~3 KB | 5 days | On Request |
-| Aggregation | ~2.5 KB | 4 days | On Request |
-| Master/Detail | ~3 KB | 5 days | On Request |
-| Server-Side Model | ~4 KB | 1 week | On Request |
+#### Phase 1 - Quick Wins (1.5 weeks)
 
-All additional features would maintain tree-shakeability.
+| Feature | Size | Dev | Test | Total | Description |
+|---------|:----:|:---:|:----:|:-----:|-------------|
+| Aggregation | ~2.5 KB | 4d | 2d | **6d** | Sum/Avg/Count/Min/Max in grouped rows |
+| Column Groups | ~1.5 KB | 2d | 1d | **3d** | Multi-level column headers |
+| Status Bar | ~1 KB | 1d | 0.5d | **1.5d** | Footer with aggregation summaries |
+
+#### Phase 2 - Data Handling (2.5 weeks)
+
+| Feature | Size | Dev | Test | Total | Description |
+|---------|:----:|:---:|:----:|:-----:|-------------|
+| Tree Data | ~3 KB | 5d | 3d | **8d** | Hierarchical parent-child display |
+| Clipboard Paste | ~2 KB | 3d | 2d | **5d** | Paste from Excel/Sheets into grid |
+
+#### Phase 3 - Advanced (3 weeks)
+
+| Feature | Size | Dev | Test | Total | Description |
+|---------|:----:|:---:|:----:|:-----:|-------------|
+| Master/Detail | ~3 KB | 5d | 3d | **8d** | Nested grids within expandable rows |
+| Server-Side Model | ~4 KB | 5d | 4d | **9d** | Backend pagination for 100K+ rows |
+
+#### Phase 4 - Nice to Have
+
+| Feature | Size | Dev | Test | Total | Description |
+|---------|:----:|:---:|:----:|:-----:|-------------|
+| Undo/Redo | ~2 KB | 3d | 2d | **5d** | Edit history with rollback |
+| Fill Handle | ~2 KB | 3d | 2d | **5d** | Drag cell corner to fill values |
+| Row Spanning | ~2 KB | 3d | 1.5d | **4.5d** | Cells spanning multiple rows |
+| Side Panels | ~2.5 KB | 2d | 1d | **3d** | Collapsible filter/tool panels |
+
+#### Low Priority (On Request)
+
+| Feature | Complexity | Notes |
+|---------|:----------:|-------|
+| Pivot Tables | Very High | Spreadsheet-style pivoting |
+| Charting Integration | High | Built-in charts from data |
+| Infinite Row Model | High | Endless scroll with lazy fetch |
+| Excel Export with Styles | Medium | Formatted Excel with colors |
+
+### Implementation Timeline
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      FEATURE ROADMAP                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Week 1-2:   ████████░░░░░░░░  Phase 1 (Aggregation, Groups)    │
+│  Week 3-4:   ░░░░░░░░████████  Phase 2 (Tree Data, Clipboard)   │
+│  Week 5-7:   ░░░░░░░░░░░░░░██  Phase 3 (Master/Detail, Server)  │
+│  Week 8+:    ░░░░░░░░░░░░░░░░  Phase 4 (On demand)              │
+│                                                                  │
+│  Current Coverage: 88% ─────────────────────────█████████████░░ │
+│  After Phase 1:    92% ─────────────────────────██████████████░ │
+│  After Phase 2:    95% ─────────────────────────███████████████ │
+│  After Phase 3:    98% ─────────────────────────███████████████ │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Testing Strategy
+
+| Test Type | Tools | Coverage |
+|-----------|-------|----------|
+| Unit Tests | Vitest | Hook logic, utilities, calculations |
+| Component Tests | React Testing Library | Render, user interactions |
+| E2E Tests | Playwright | Full user workflows |
+| Visual Regression | Playwright screenshots | Layout consistency |
+| Performance | Custom benchmarks | 10K+ row handling |
+
+### Size After All Phases
+
+| Phase | Added Size | Total Size | Coverage |
+|-------|:----------:|:----------:|:--------:|
+| Current | - | ~27 KB | 88% |
+| Phase 1 | +5 KB | ~32 KB | 92% |
+| Phase 2 | +5 KB | ~37 KB | 95% |
+| Phase 3 | +7 KB | ~44 KB | 98% |
+| Phase 4 | +8.5 KB | ~52 KB | 99% |
+
+**Even with ALL features, still 6x smaller than AG-Grid Community (~300 KB)**
+
+All additional features will maintain tree-shakeability.
 
 ---
 
